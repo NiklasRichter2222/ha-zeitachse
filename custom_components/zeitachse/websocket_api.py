@@ -1,0 +1,177 @@
+"""WebSocket API for Zeitachse panel."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant.components import websocket_api
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
+
+from .const import (
+    COLOR_PALETTE,
+    CONF_TRACKED_PERSONS,
+    RUNTIME_DATA_KEY,
+    WS_GET_TIMELINE,
+    WS_LIST_PEOPLE,
+    WS_SET_ACTIVE_PEOPLE,
+)
+from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
+
+
+class ZeitachseRuntimeData:
+    """Runtime objects used by websocket commands."""
+
+    def __init__(
+        self,
+        config_entry: ConfigEntry,
+        snapshot_storage: EncryptedSnapshotStorage,
+        preferences: UserPreferenceStorage,
+    ) -> None:
+        self.config_entry = config_entry
+        self.snapshot_storage = snapshot_storage
+        self.preferences = preferences
+
+    @property
+    def tracked_persons(self) -> list[str]:
+        """Return tracked persons from options or entry data."""
+        return self.config_entry.options.get(
+            CONF_TRACKED_PERSONS,
+            self.config_entry.data.get(CONF_TRACKED_PERSONS, []),
+        )
+
+
+def _infer_self_person(hass: HomeAssistant, user_id: str, person_ids: list[str]) -> str | None:
+    """Resolve the matching person entity for a user id."""
+    for entity_id in person_ids:
+        state = hass.states.get(entity_id)
+        if state and state.attributes.get("user_id") == user_id:
+            return entity_id
+    return None
+
+
+async def _get_active_persons(
+    hass: HomeAssistant,
+    runtime: ZeitachseRuntimeData,
+    user_id: str,
+) -> set[str]:
+    """Return active persons for a user, defaulting to self when unset."""
+    prefs = await runtime.preferences.async_get(user_id)
+    active_people = set(prefs.get("active_people", []))
+    tracked_people = set(runtime.tracked_persons)
+
+    if active_people:
+        return active_people & tracked_people
+
+    self_person = _infer_self_person(hass, user_id, runtime.tracked_persons)
+    return {self_person} if self_person else set()
+
+
+def _person_payload(hass: HomeAssistant, person_entity_id: str, color: str, active: bool) -> dict[str, Any]:
+    state = hass.states.get(person_entity_id)
+    return {
+        "entity_id": person_entity_id,
+        "name": state.attributes.get("friendly_name", person_entity_id) if state else person_entity_id,
+        "color": color,
+        "active": active,
+    }
+
+
+@websocket_api.websocket_command({vol.Required("type"): WS_LIST_PEOPLE})
+@websocket_api.async_response
+async def ws_list_people(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """List tracked people and active state for current user."""
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    active = await _get_active_persons(hass, runtime, connection.user.id)
+    people = [
+        _person_payload(hass, entity_id, COLOR_PALETTE[index % len(COLOR_PALETTE)], entity_id in active)
+        for index, entity_id in enumerate(runtime.tracked_persons)
+    ]
+    connection.send_result(msg["id"], {"people": people})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_SET_ACTIVE_PEOPLE,
+        vol.Required("active_people"): [cv.entity_id],
+    }
+)
+@websocket_api.async_response
+async def ws_set_active_people(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set active people for the current user."""
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    tracked = set(runtime.tracked_persons)
+    active = [entity_id for entity_id in msg["active_people"] if entity_id in tracked]
+    await runtime.preferences.async_set(connection.user.id, {"active_people": active})
+    connection.send_result(msg["id"], {"active_people": active})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_GET_TIMELINE,
+        vol.Required("entity_id"): cv.entity_id,
+        vol.Optional("start"): cv.datetime,
+        vol.Optional("end"): cv.datetime,
+    }
+)
+@websocket_api.async_response
+async def ws_get_timeline(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Get timeline snapshots for one person."""
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    entity_id = msg["entity_id"]
+    if entity_id not in runtime.tracked_persons:
+        connection.send_error(msg["id"], "not_tracked", "Person is not configured for tracking")
+        return
+
+    timeline = await runtime.snapshot_storage.async_get_person_timeline(entity_id)
+    start: datetime | None = msg.get("start")
+    end: datetime | None = msg.get("end")
+    if start and start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    if end and end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+
+    if start or end:
+        filtered: list[dict[str, Any]] = []
+        for item in timeline:
+            try:
+                ts = datetime.fromisoformat(item["timestamp"])
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+            except (KeyError, ValueError, TypeError):
+                continue
+            if start and ts < start:
+                continue
+            if end and ts > end:
+                continue
+            filtered.append(item)
+        timeline = filtered
+
+    connection.send_result(msg["id"], {"timeline": timeline})
+
+
+async def async_register_websocket_api(
+    hass: HomeAssistant,
+    runtime: ZeitachseRuntimeData,
+) -> None:
+    """Register websocket commands for Zeitachse."""
+    hass.data[RUNTIME_DATA_KEY] = runtime
+    websocket_api.async_register_command(hass, ws_list_people)
+    websocket_api.async_register_command(hass, ws_set_active_people)
+    websocket_api.async_register_command(hass, ws_get_timeline)
