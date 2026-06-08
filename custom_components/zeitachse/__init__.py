@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 from typing import Any
 
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_interval
@@ -25,6 +27,8 @@ from .const import (
 )
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 from .websocket_api import ZeitachseRuntimeData, async_register_websocket_api
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class TrackingManager:
@@ -110,6 +114,19 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["panel_registered"] = True
 
 
+def _async_schedule_panel_registration(hass: HomeAssistant) -> None:
+    """Register the sidebar panel now or once Home Assistant fully started."""
+    hass.async_create_task(_async_register_panel(hass))
+
+    async def _async_retry_register_panel(_: Any) -> None:
+        try:
+            await _async_register_panel(hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Failed to register Zeitachse sidebar panel after startup")
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_retry_register_panel)
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up integration from YAML (unused)."""
     hass.data.setdefault(DOMAIN, {})
@@ -140,7 +157,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_ENABLE_DASHBOARD,
         entry.data.get(CONF_ENABLE_DASHBOARD, DEFAULT_ENABLE_DASHBOARD),
     ):
-        await _async_register_panel(hass)
+        _async_schedule_panel_registration(hass)
 
     hass.data[DOMAIN][entry.entry_id] = {
         "tracker": tracker,
