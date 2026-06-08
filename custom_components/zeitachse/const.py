@@ -14,6 +14,7 @@ DEFAULT_ENABLE_DASHBOARD = True
 SNAPSHOT_STORAGE_FILE = ".storage/zeitachse_snapshots.enc"
 PREFERENCES_STORAGE_KEY = "zeitachse_user_preferences"
 PREFERENCES_STORAGE_VERSION = 1
+RUNTIME_DATA_KEY = "zeitachse_runtime"
 MAX_SNAPSHOTS_PER_PERSON = 10000
 
 WS_LIST_PEOPLE = "zeitachse/list_people"

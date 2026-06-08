@@ -15,6 +15,7 @@ from homeassistant.helpers import config_validation as cv
 from .const import (
     COLOR_PALETTE,
     CONF_TRACKED_PERSONS,
+    RUNTIME_DATA_KEY,
     WS_GET_TIMELINE,
     WS_LIST_PEOPLE,
     WS_SET_ACTIVE_PEOPLE,
@@ -87,7 +88,7 @@ async def ws_list_people(
     msg: dict[str, Any],
 ) -> None:
     """List tracked people and active state for current user."""
-    runtime: ZeitachseRuntimeData = hass.data["zeitachse_runtime"]
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     active = await _get_active_persons(hass, runtime, connection.user.id)
     people = [
         _person_payload(hass, entity_id, COLOR_PALETTE[index % len(COLOR_PALETTE)], entity_id in active)
@@ -109,7 +110,7 @@ async def ws_set_active_people(
     msg: dict[str, Any],
 ) -> None:
     """Set active people for the current user."""
-    runtime: ZeitachseRuntimeData = hass.data["zeitachse_runtime"]
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     tracked = set(runtime.tracked_persons)
     active = [entity_id for entity_id in msg["active_people"] if entity_id in tracked]
     await runtime.preferences.async_set(connection.user.id, {"active_people": active})
@@ -131,7 +132,7 @@ async def ws_get_timeline(
     msg: dict[str, Any],
 ) -> None:
     """Get timeline snapshots for one person."""
-    runtime: ZeitachseRuntimeData = hass.data["zeitachse_runtime"]
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     entity_id = msg["entity_id"]
     if entity_id not in runtime.tracked_persons:
         connection.send_error(msg["id"], "not_tracked", "Person is not configured for tracking")
@@ -169,7 +170,7 @@ async def async_register_websocket_api(
     runtime: ZeitachseRuntimeData,
 ) -> None:
     """Register websocket commands for Zeitachse."""
-    hass.data["zeitachse_runtime"] = runtime
+    hass.data[RUNTIME_DATA_KEY] = runtime
     websocket_api.async_register_command(hass, ws_list_people)
     websocket_api.async_register_command(hass, ws_set_active_people)
     websocket_api.async_register_command(hass, ws_get_timeline)

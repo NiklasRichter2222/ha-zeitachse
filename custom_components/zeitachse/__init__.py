@@ -20,6 +20,7 @@ from .const import (
     DEFAULT_ENABLE_DASHBOARD,
     DEFAULT_INTERVAL_MINUTES,
     DOMAIN,
+    RUNTIME_DATA_KEY,
     SNAPSHOT_STORAGE_FILE,
 )
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
@@ -133,7 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await async_register_websocket_api(hass, runtime)
         hass.data[DOMAIN]["websocket_registered"] = True
     else:
-        hass.data["zeitachse_runtime"] = runtime
+        hass.data[RUNTIME_DATA_KEY] = runtime
 
     if entry.options.get(
         CONF_ENABLE_DASHBOARD,

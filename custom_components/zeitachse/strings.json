@@ -1,17 +1,17 @@
 {
   "config": {
     "abort": {
-      "single_instance_allowed": "Diese Integration kann nur einmal eingerichtet werden."
+      "single_instance_allowed": "This integration can only be configured once."
     },
     "step": {
       "user": {
-        "title": "Zeitachse einrichten",
-        "description": "Wähle Personen und das Snapshot-Intervall. Ohne Auswahl wird niemand getrackt.",
+        "title": "Set up Zeitachse",
+        "description": "Select people and snapshot interval. Without selection, no one is tracked.",
         "data": {
           "name": "Name",
-          "tracked_persons": "Zu trackende Personen",
-          "interval_minutes": "Intervall in Minuten",
-          "enable_dashboard": "Dashboard in der Seitenleiste aktivieren"
+          "tracked_persons": "People to track",
+          "interval_minutes": "Interval in minutes",
+          "enable_dashboard": "Enable dashboard in sidebar"
         }
       }
     }
@@ -19,12 +19,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "Zeitachse Optionen",
+        "title": "Zeitachse options",
         "data": {
           "name": "Name",
-          "tracked_persons": "Zu trackende Personen",
-          "interval_minutes": "Intervall in Minuten",
-          "enable_dashboard": "Dashboard in der Seitenleiste aktivieren"
+          "tracked_persons": "People to track",
+          "interval_minutes": "Interval in minutes",
+          "enable_dashboard": "Enable dashboard in sidebar"
         }
       }
     }
