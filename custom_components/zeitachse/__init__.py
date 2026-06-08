@@ -125,7 +125,7 @@ def _async_schedule_panel_registration(hass: HomeAssistant) -> None:
             await _async_register_panel(hass)
         except ValueError:
             _LOGGER.debug("Zeitachse sidebar panel already registered")
-        except Exception:  # noqa: BLE001
+        except RuntimeError:
             _LOGGER.exception("Failed to register Zeitachse sidebar panel after startup")
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_retry_register_panel)
