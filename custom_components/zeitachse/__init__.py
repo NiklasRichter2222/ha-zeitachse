@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import inspect
 import logging
 from typing import Any
 
@@ -106,7 +107,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     )
     integration = await async_get_integration(hass, DOMAIN)
     panel_module_url = f"{FRONTEND_URL_PATH}/zeitachse-panel.js?v={integration.version}"
-    await panel_custom.async_register_panel(
+    panel_registration = panel_custom.async_register_panel(
         hass,
         webcomponent_name="zeitachse-panel",
         frontend_url_path="zeitachse",
@@ -116,9 +117,13 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         require_admin=False,
         config={},
     )
+    if inspect.isawaitable(panel_registration):
+        await panel_registration
     card_module_url = f"{FRONTEND_URL_PATH}/zeitachse-card.js?v={integration.version}"
     if hasattr(frontend, "async_add_extra_js_url"):
-        frontend.async_add_extra_js_url(hass, card_module_url)
+        add_result = frontend.async_add_extra_js_url(hass, card_module_url)
+        if inspect.isawaitable(add_result):
+            await add_result
     elif hasattr(frontend, "add_extra_js_url"):
         frontend.add_extra_js_url(hass, card_module_url)
     hass.data[DOMAIN]["panel_registered"] = True

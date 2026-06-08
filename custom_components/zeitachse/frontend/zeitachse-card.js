@@ -25,7 +25,7 @@ class ZeitachseCard extends HTMLElement {
     if (!this._loaded && this._hass) {
       this._loaded = true;
       this._load().catch((error) => {
-        this._showStatus(`Fehler beim Laden: ${error?.message || error}`);
+        this._showStatus(`Loading failed: ${error?.message || error}`);
       });
     }
   }
@@ -73,7 +73,7 @@ class ZeitachseCard extends HTMLElement {
   async _load() {
     if (!this._hass) return;
     if (!window.L) {
-      this._showStatus("Leaflet nicht verfügbar. Bitte Home Assistant neu laden.");
+      this._showStatus("Leaflet unavailable. Please reload Home Assistant.");
       return;
     }
 
