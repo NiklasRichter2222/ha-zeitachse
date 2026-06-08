@@ -12,7 +12,11 @@ from cryptography.fernet import Fernet, InvalidToken
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import PREFERENCES_STORAGE_KEY, PREFERENCES_STORAGE_VERSION
+from .const import (
+    MAX_SNAPSHOTS_PER_PERSON,
+    PREFERENCES_STORAGE_KEY,
+    PREFERENCES_STORAGE_VERSION,
+)
 
 
 class EncryptedSnapshotStorage:
@@ -54,8 +58,8 @@ class EncryptedSnapshotStorage:
         data = await self.async_load()
         snapshots = data.setdefault(person_entity_id, [])
         snapshots.append(snapshot)
-        if len(snapshots) > 10000:
-            del snapshots[:-10000]
+        if len(snapshots) > MAX_SNAPSHOTS_PER_PERSON:
+            del snapshots[:-MAX_SNAPSHOTS_PER_PERSON]
 
         payload = json.dumps(data, separators=(",", ":")).encode()
         encrypted = self._fernet.encrypt(payload)

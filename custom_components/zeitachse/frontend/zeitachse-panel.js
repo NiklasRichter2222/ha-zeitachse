@@ -1,3 +1,6 @@
+const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
+const DEFAULT_MAP_ZOOM = 6;
+
 class ZeitachsePanel extends HTMLElement {
   constructor() {
     super();
@@ -35,7 +38,7 @@ class ZeitachsePanel extends HTMLElement {
 
   _initMap() {
     if (!window.L || this.map) return;
-    this.map = window.L.map(this.shadowRoot.getElementById("map")).setView([51.1657, 10.4515], 6);
+    this.map = window.L.map(this.shadowRoot.getElementById("map")).setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
     window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(this.map);

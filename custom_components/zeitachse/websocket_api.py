@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import voluptuous as vol
@@ -140,12 +140,18 @@ async def ws_get_timeline(
     timeline = await runtime.snapshot_storage.async_get_person_timeline(entity_id)
     start: datetime | None = msg.get("start")
     end: datetime | None = msg.get("end")
+    if start and start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    if end and end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
 
     if start or end:
         filtered: list[dict[str, Any]] = []
         for item in timeline:
             try:
                 ts = datetime.fromisoformat(item["timestamp"])
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
             except (KeyError, ValueError, TypeError):
                 continue
             if start and ts < start:
