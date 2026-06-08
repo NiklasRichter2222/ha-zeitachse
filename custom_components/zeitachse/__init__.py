@@ -76,10 +76,8 @@ class TrackingManager:
             longitude = state.attributes.get("longitude")
             if latitude is None or longitude is None:
                 _LOGGER.debug(
-                    "Skipping snapshot for %s: missing coordinates (latitude=%s, longitude=%s)",
+                    "Skipping snapshot for %s: missing coordinates",
                     person_entity_id,
-                    latitude,
-                    longitude,
                 )
                 continue
 
