@@ -1,5 +1,27 @@
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
+const LEAFLET_SHADOW_CSS = `
+  .leaflet-container { position: relative; overflow: hidden; background: #ddd; }
+  .leaflet-pane, .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow,
+  .leaflet-tile-container, .leaflet-pane > svg, .leaflet-pane > canvas,
+  .leaflet-zoom-box, .leaflet-image-layer, .leaflet-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+  .leaflet-pane { z-index: 400; }
+  .leaflet-tile-pane { z-index: 200; }
+  .leaflet-overlay-pane { z-index: 400; }
+  .leaflet-shadow-pane { z-index: 500; }
+  .leaflet-marker-pane { z-index: 600; }
+  .leaflet-tooltip-pane { z-index: 650; }
+  .leaflet-popup-pane { z-index: 700; }
+  .leaflet-map-pane canvas { z-index: 100; }
+  .leaflet-map-pane svg { z-index: 200; }
+  .leaflet-tile { visibility: hidden; }
+  .leaflet-tile-loaded { visibility: inherit; }
+  .leaflet-container .leaflet-overlay-pane svg { max-width: none !important; max-height: none !important; }
+`;
 
 class ZeitachseCard extends HTMLElement {
   constructor() {
@@ -44,6 +66,7 @@ class ZeitachseCard extends HTMLElement {
         .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
         .status { margin-bottom: 12px; color: var(--secondary-text-color); }
+        ${LEAFLET_SHADOW_CSS}
       </style>
       <ha-card>
         <div class="status" id="status">Zeitachse lädt…</div>
@@ -70,6 +93,9 @@ class ZeitachseCard extends HTMLElement {
     window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(this.map);
+    requestAnimationFrame(() => this.map?.invalidateSize(true));
+    this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
+    this._resizeObserver.observe(mapElement);
   }
 
   async _load() {
@@ -143,8 +169,8 @@ class ZeitachseCard extends HTMLElement {
     for (const person of this.people.filter((it) => it.active)) {
       const timeline = this.timelineByPerson.get(person.entity_id) || [];
       const points = timeline
-        .map((entry) => [entry.latitude, entry.longitude])
-        .filter((entry) => typeof entry[0] === "number" && typeof entry[1] === "number");
+        .map((entry) => this._toPoint(entry))
+        .filter((entry) => entry !== null);
 
       if (points.length === 0) continue;
 
@@ -160,7 +186,19 @@ class ZeitachseCard extends HTMLElement {
 
     if (latest) {
       this.map.setView(latest, 12);
+    } else {
+      this.map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
     }
+    this.map.invalidateSize(true);
+  }
+
+  _toPoint(entry) {
+    const latitude = Number(entry?.latitude);
+    const longitude = Number(entry?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return null;
+    }
+    return [latitude, longitude];
   }
 }
 
