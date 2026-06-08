@@ -93,10 +93,8 @@ class TrackingManager:
                 await self._storage.async_append(person_entity_id, snapshot)
                 stored_count += 1
                 _LOGGER.debug(
-                    "Stored snapshot for %s at (%s, %s) with state '%s'",
+                    "Stored snapshot for %s with state '%s'",
                     person_entity_id,
-                    latitude,
-                    longitude,
                     state.state,
                 )
             except Exception:  # noqa: BLE001
