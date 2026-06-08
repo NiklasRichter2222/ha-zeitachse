@@ -120,7 +120,7 @@ class ZeitachsePanel extends HTMLElement {
       const lastPoint = points[points.length - 1];
       latest = latest || lastPoint;
       const marker = window.L.circleMarker(lastPoint, { color: person.color, radius: 7 }).addTo(this.map);
-      marker.bindPopup(`${person.name} (${timeline.length} points)`);
+      marker.bindPopup(`${person.name} (${points.length} points)`);
       this.layers.push(marker);
     }
 

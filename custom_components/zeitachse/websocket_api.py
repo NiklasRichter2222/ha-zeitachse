@@ -59,6 +59,7 @@ async def _get_active_persons(
     runtime: ZeitachseRuntimeData,
     user_id: str,
 ) -> set[str]:
+    """Return active persons for a user, defaulting to self when unset."""
     prefs = await runtime.preferences.async_get(user_id)
     active_people = set(prefs.get("active_people", []))
     tracked_people = set(runtime.tracked_persons)
