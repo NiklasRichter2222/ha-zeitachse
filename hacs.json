@@ -4,5 +4,5 @@
   "render_readme": true,
   "domains": ["zeitachse"],
   "country": ["DE"],
-  "homeassistant": ">=2024.6.0"
+  "homeassistant": "2024.6.0"
 }
