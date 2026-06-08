@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -21,6 +22,8 @@ from .const import (
     WS_SET_ACTIVE_PEOPLE,
 )
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ZeitachseRuntimeData:
@@ -135,11 +138,20 @@ async def ws_get_timeline(
     """Get timeline snapshots for one person."""
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     entity_id = msg["entity_id"]
+    _LOGGER.debug(
+        "Timeline request received: user_id=%s entity_id=%s start=%s end=%s",
+        connection.user.id,
+        entity_id,
+        msg.get("start"),
+        msg.get("end"),
+    )
     if entity_id not in runtime.tracked_persons:
+        _LOGGER.debug("Timeline request rejected: entity %s is not tracked", entity_id)
         connection.send_error(msg["id"], "not_tracked", "Person is not configured for tracking")
         return
 
     timeline = await runtime.snapshot_storage.async_get_person_timeline(entity_id)
+    _LOGGER.debug("Loaded %d snapshots for entity %s before filtering", len(timeline), entity_id)
     start: datetime | None = msg.get("start")
     end: datetime | None = msg.get("end")
     if start and start.tzinfo is None:
@@ -149,12 +161,14 @@ async def ws_get_timeline(
 
     if start or end:
         filtered: list[dict[str, Any]] = []
+        dropped_invalid = 0
         for item in timeline:
             try:
                 ts = datetime.fromisoformat(item["timestamp"])
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=UTC)
             except (KeyError, ValueError, TypeError):
+                dropped_invalid += 1
                 continue
             if start and ts < start:
                 continue
@@ -162,7 +176,14 @@ async def ws_get_timeline(
                 continue
             filtered.append(item)
         timeline = filtered
+        _LOGGER.debug(
+            "Timeline filtered for %s: remaining=%d dropped_invalid=%d",
+            entity_id,
+            len(timeline),
+            dropped_invalid,
+        )
 
+    _LOGGER.debug("Sending timeline response: entity_id=%s snapshots=%d", entity_id, len(timeline))
     connection.send_result(msg["id"], {"timeline": timeline})
 
 

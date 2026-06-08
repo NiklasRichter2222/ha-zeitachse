@@ -3,6 +3,8 @@ import { toPoint } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
+const LEAFLET_WAIT_MAX_ATTEMPTS = 10;
+const LEAFLET_WAIT_DELAY_MS = 500;
 
 class ZeitachseCard extends HTMLElement {
   constructor() {
@@ -13,6 +15,7 @@ class ZeitachseCard extends HTMLElement {
     this.map = null;
     this.layers = [];
     this._loaded = false;
+    this._mapInitFailed = false;
   }
 
   disconnectedCallback() {
@@ -28,11 +31,11 @@ class ZeitachseCard extends HTMLElement {
     this._hass = hass;
     if (!this.shadowRoot.innerHTML) {
       this._renderShell();
-      this._initMap();
     }
     if (!this._loaded && this._hass) {
       this._loaded = true;
       this._load().catch((error) => {
+        console.error("[zeitachse-card] Loading failed", error);
         this._showStatus(`Loading failed: ${error?.message || error}`);
       });
     }
@@ -71,32 +74,66 @@ class ZeitachseCard extends HTMLElement {
     }
   }
 
+  async _waitForLeaflet() {
+    for (let attempt = 1; attempt <= LEAFLET_WAIT_MAX_ATTEMPTS; attempt += 1) {
+      if (window.L) {
+        if (attempt > 1) {
+          console.debug(`[zeitachse-card] Leaflet became available after ${attempt} attempts`);
+        }
+        return true;
+      }
+      console.debug(`[zeitachse-card] Waiting for Leaflet (${attempt}/${LEAFLET_WAIT_MAX_ATTEMPTS})`);
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, LEAFLET_WAIT_DELAY_MS);
+      });
+    }
+    return false;
+  }
+
   _initMap() {
-    if (!window.L || this.map) return;
+    if (!window.L || this.map) return false;
     const mapElement = this.shadowRoot.getElementById("map");
-    if (!mapElement) return;
-    this.map = window.L.map(mapElement).setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
-    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(this.map);
-    requestAnimationFrame(() => this.map?.invalidateSize(true));
-    this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
-    this._resizeObserver.observe(mapElement);
+    if (!mapElement) return false;
+    try {
+      this.map = window.L.map(mapElement).setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(this.map);
+      requestAnimationFrame(() => this.map?.invalidateSize(true));
+      this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
+      this._resizeObserver.observe(mapElement);
+      console.debug("[zeitachse-card] Map initialized");
+      this._mapInitFailed = false;
+      return true;
+    } catch (error) {
+      console.error("[zeitachse-card] Failed to initialize map", error);
+      this._mapInitFailed = true;
+      return false;
+    }
   }
 
   async _load() {
     if (!this._hass) return;
-    if (!window.L) {
-      this._showStatus("Leaflet unavailable. Please reload Home Assistant.");
+    const leafletReady = await this._waitForLeaflet();
+    if (!leafletReady || !this._initMap()) {
+      this._showStatus("Map unavailable: Leaflet failed to load.");
+      this._mapInitFailed = true;
+      console.error("[zeitachse-card] Leaflet unavailable; map rendering disabled");
       return;
     }
 
-    const result = await this._hass.callWS({ type: "zeitachse/list_people" });
-    this.people = result.people || [];
-    await this._loadTimelines();
-    this._renderControls();
-    this._renderMap();
-    this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine Personen gefunden");
+    try {
+      const result = await this._hass.callWS({ type: "zeitachse/list_people" });
+      this.people = result.people || [];
+      console.debug(`[zeitachse-card] Loaded ${this.people.length} people`);
+      await this._loadTimelines();
+      this._renderControls();
+      this._renderMap();
+      this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine Personen gefunden");
+    } catch (error) {
+      console.error("[zeitachse-card] Failed to load people/timeline data", error);
+      this._showStatus(`Network error while loading timeline: ${error?.message || error}`);
+    }
   }
 
   async _loadTimelines() {
@@ -108,6 +145,9 @@ class ZeitachseCard extends HTMLElement {
           entity_id: person.entity_id,
         });
         this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
+        console.debug(
+          `[zeitachse-card] Loaded ${this.timelineByPerson.get(person.entity_id).length} snapshots for ${person.entity_id}`
+        );
       })
     );
   }
@@ -125,17 +165,28 @@ class ZeitachseCard extends HTMLElement {
         <span>${person.name}</span>
       `;
       row.querySelector("input").addEventListener("change", async (event) => {
-        person.active = event.target.checked;
-        await this._hass.callWS({
-          type: "zeitachse/set_active_people",
-          active_people: this.people.filter((it) => it.active).map((it) => it.entity_id),
-        });
-        if (person.active) {
-          const timeline = await this._hass.callWS({
-            type: "zeitachse/get_timeline",
-            entity_id: person.entity_id,
+        const isActive = event.target.checked;
+        person.active = isActive;
+        try {
+          await this._hass.callWS({
+            type: "zeitachse/set_active_people",
+            active_people: this.people.filter((it) => it.active).map((it) => it.entity_id),
           });
-          this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
+          if (person.active) {
+            const timeline = await this._hass.callWS({
+              type: "zeitachse/get_timeline",
+              entity_id: person.entity_id,
+            });
+            this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
+            console.debug(
+              `[zeitachse-card] Loaded ${this.timelineByPerson.get(person.entity_id).length} snapshots for ${person.entity_id}`
+            );
+          }
+        } catch (error) {
+          person.active = !isActive;
+          event.target.checked = person.active;
+          console.error("[zeitachse-card] Failed to update active people", error);
+          this._showStatus(`Network error while updating active people: ${error?.message || error}`);
         }
         this._renderMap();
       });
@@ -144,7 +195,14 @@ class ZeitachseCard extends HTMLElement {
   }
 
   _renderMap() {
-    if (!this.map || !window.L) return;
+    if (this._mapInitFailed) {
+      this._showStatus("Map unavailable: Leaflet failed to load.");
+      return;
+    }
+    if (!this.map || !window.L) {
+      console.debug("[zeitachse-card] Skipping map render because map is not ready");
+      return;
+    }
 
     for (const layer of this.layers) {
       this.map.removeLayer(layer);

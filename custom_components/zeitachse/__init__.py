@@ -59,24 +59,52 @@ class TrackingManager:
 
     async def _async_collect_snapshot(self, *_: Any) -> None:
         now = datetime.now(UTC).isoformat()
-        for person_entity_id in self._tracked_persons():
+        tracked_persons = self._tracked_persons()
+        stored_count = 0
+        failed_count = 0
+        _LOGGER.debug(
+            "Collecting Zeitachse snapshots at %s for %d tracked persons",
+            now,
+            len(tracked_persons),
+        )
+        for person_entity_id in tracked_persons:
             state = self._hass.states.get(person_entity_id)
             if state is None:
+                _LOGGER.debug("Skipping snapshot for %s: state not found", person_entity_id)
                 continue
             latitude = state.attributes.get("latitude")
             longitude = state.attributes.get("longitude")
             if latitude is None or longitude is None:
+                _LOGGER.debug(
+                    "Skipping snapshot for %s: missing coordinates",
+                    person_entity_id,
+                )
                 continue
 
-            await self._storage.async_append(
-                person_entity_id,
-                {
-                    "timestamp": now,
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "state": state.state,
-                },
-            )
+            snapshot = {
+                "timestamp": now,
+                "latitude": latitude,
+                "longitude": longitude,
+                "state": state.state,
+            }
+            try:
+                await self._storage.async_append(person_entity_id, snapshot)
+                stored_count += 1
+                _LOGGER.debug(
+                    "Stored snapshot for %s with state '%s'",
+                    person_entity_id,
+                    state.state,
+                )
+            except Exception:  # noqa: BLE001
+                failed_count += 1
+                _LOGGER.exception("Failed to store snapshot for %s", person_entity_id)
+
+        _LOGGER.debug(
+            "Finished Zeitachse snapshot collection at %s: stored=%d, failed=%d",
+            now,
+            stored_count,
+            failed_count,
+        )
 
     async def async_start(self) -> None:
         """Start periodic tracking."""
