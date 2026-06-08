@@ -29,6 +29,7 @@ from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 from .websocket_api import ZeitachseRuntimeData, async_register_websocket_api
 
 _LOGGER = logging.getLogger(__name__)
+PANEL_REGISTRATION_RETRY_DELAY = 30
 
 
 class TrackingManager:
@@ -114,14 +115,14 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["panel_registered"] = True
 
 
-def _async_schedule_panel_registration(hass: HomeAssistant) -> None:
+def _schedule_panel_registration(hass: HomeAssistant) -> None:
     """Register now, retry at startup, then retry once again after a short delay."""
     async def _async_try_register_panel(context: str) -> None:
         if hass.data[DOMAIN].get("panel_registered"):
             return
         try:
             await _async_register_panel(hass)
-        except RuntimeError:
+        except Exception:  # noqa: BLE001
             _LOGGER.exception(
                 "Failed to register Zeitachse sidebar panel (%s)",
                 context,
@@ -134,7 +135,11 @@ def _async_schedule_panel_registration(hass: HomeAssistant) -> None:
             return
         await _async_try_register_panel("startup retry")
         if not hass.data[DOMAIN].get("panel_registered"):
-            async_call_later(hass, 30, _async_delayed_retry_register_panel)
+            async_call_later(
+                hass,
+                PANEL_REGISTRATION_RETRY_DELAY,
+                _async_delayed_retry_register_panel,
+            )
 
     async def _async_delayed_retry_register_panel(_: Any) -> None:
         await _async_try_register_panel("delayed retry")
@@ -172,7 +177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_ENABLE_DASHBOARD,
         entry.data.get(CONF_ENABLE_DASHBOARD, DEFAULT_ENABLE_DASHBOARD),
     ):
-        _async_schedule_panel_registration(hass)
+        _schedule_panel_registration(hass)
 
     hass.data[DOMAIN][entry.entry_id] = {
         "tracker": tracker,
