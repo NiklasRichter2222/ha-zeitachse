@@ -33,6 +33,11 @@ class ZeitachsePanel extends HTMLElement {
     this.layers = [];
   }
 
+  disconnectedCallback() {
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
+  }
+
   set hass(hass) {
     this._hass = hass;
     if (!this.shadowRoot.innerHTML) {

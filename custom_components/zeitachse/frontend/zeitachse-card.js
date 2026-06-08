@@ -34,6 +34,11 @@ class ZeitachseCard extends HTMLElement {
     this._loaded = false;
   }
 
+  disconnectedCallback() {
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
+  }
+
   setConfig(config) {
     this.config = config || {};
   }
