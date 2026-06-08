@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 from typing import Any
 
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -25,6 +27,9 @@ from .const import (
 )
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 from .websocket_api import ZeitachseRuntimeData, async_register_websocket_api
+
+_LOGGER = logging.getLogger(__name__)
+PANEL_REGISTRATION_RETRY_DELAY = 30
 
 
 class TrackingManager:
@@ -110,6 +115,38 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["panel_registered"] = True
 
 
+def _schedule_panel_registration(hass: HomeAssistant) -> None:
+    """Register now, retry at startup, then retry once again after a short delay."""
+    async def _async_try_register_panel(context: str) -> None:
+        if hass.data[DOMAIN].get("panel_registered"):
+            return
+        try:
+            await _async_register_panel(hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception(
+                "Failed to register Zeitachse sidebar panel (%s)",
+                context,
+            )
+
+    hass.async_create_task(_async_try_register_panel("initial attempt"))
+
+    async def _async_retry_register_panel(_: Any) -> None:
+        if hass.data[DOMAIN].get("panel_registered"):
+            return
+        await _async_try_register_panel("startup retry")
+        if not hass.data[DOMAIN].get("panel_registered"):
+            async_call_later(
+                hass,
+                PANEL_REGISTRATION_RETRY_DELAY,
+                _async_delayed_retry_register_panel,
+            )
+
+    async def _async_delayed_retry_register_panel(_: Any) -> None:
+        await _async_try_register_panel("delayed retry")
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_retry_register_panel)
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up integration from YAML (unused)."""
     hass.data.setdefault(DOMAIN, {})
@@ -140,7 +177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_ENABLE_DASHBOARD,
         entry.data.get(CONF_ENABLE_DASHBOARD, DEFAULT_ENABLE_DASHBOARD),
     ):
-        await _async_register_panel(hass)
+        _schedule_panel_registration(hass)
 
     hass.data[DOMAIN][entry.entry_id] = {
         "tracker": tracker,
