@@ -1,4 +1,5 @@
 import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
+import { toPoint } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
@@ -120,7 +121,7 @@ class ZeitachsePanel extends HTMLElement {
     for (const person of this.people.filter((it) => it.active)) {
       const timeline = this.timelineByPerson.get(person.entity_id) || [];
       const points = timeline
-        .map((entry) => this._toPoint(entry))
+        .map((entry) => toPoint(entry))
         .filter((entry) => entry !== null);
 
       if (points.length === 0) continue;
@@ -141,15 +142,6 @@ class ZeitachsePanel extends HTMLElement {
       this.map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
     }
     this.map.invalidateSize(true);
-  }
-
-  _toPoint(entry) {
-    const latitude = Number(entry?.latitude);
-    const longitude = Number(entry?.longitude);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-      return null;
-    }
-    return [latitude, longitude];
   }
 
   static get properties() {
