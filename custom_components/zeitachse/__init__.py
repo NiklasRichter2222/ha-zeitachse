@@ -11,7 +11,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -133,6 +133,14 @@ def _async_schedule_panel_registration(hass: HomeAssistant) -> None:
         if hass.data[DOMAIN].get("panel_registered"):
             return
         await _async_try_register_panel("startup retry")
+        if not hass.data[DOMAIN].get("panel_registered"):
+            async_call_later(
+                hass,
+                30,
+                lambda __: hass.async_create_task(
+                    _async_try_register_panel("delayed retry")
+                ),
+            )
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_retry_register_panel)
 
