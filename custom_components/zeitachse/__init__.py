@@ -116,17 +116,23 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
 def _async_schedule_panel_registration(hass: HomeAssistant) -> None:
     """Register now and retry once Home Assistant fully starts."""
-    hass.async_create_task(_async_register_panel(hass))
+    async def _async_try_register_panel(context: str) -> None:
+        try:
+            await _async_register_panel(hass)
+        except ValueError:
+            _LOGGER.debug("Zeitachse sidebar panel already registered (%s)", context)
+        except RuntimeError:
+            _LOGGER.exception(
+                "Failed to register Zeitachse sidebar panel (%s)",
+                context,
+            )
+
+    hass.async_create_task(_async_try_register_panel("initial attempt"))
 
     async def _async_retry_register_panel(_: Any) -> None:
         if hass.data[DOMAIN].get("panel_registered"):
             return
-        try:
-            await _async_register_panel(hass)
-        except ValueError:
-            _LOGGER.debug("Zeitachse sidebar panel already registered")
-        except RuntimeError:
-            _LOGGER.exception("Failed to register Zeitachse sidebar panel after startup")
+        await _async_try_register_panel("startup retry")
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_retry_register_panel)
 
