@@ -6,13 +6,14 @@ from datetime import UTC, datetime, timedelta
 import logging
 from typing import Any
 
-from homeassistant.components import panel_custom
+from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from .const import (
     CONF_ENABLE_DASHBOARD,
@@ -30,6 +31,7 @@ from .websocket_api import ZeitachseRuntimeData, async_register_websocket_api
 
 _LOGGER = logging.getLogger(__name__)
 PANEL_REGISTRATION_RETRY_DELAY = 30
+FRONTEND_URL_PATH = "/zeitachse_static"
 
 
 class TrackingManager:
@@ -96,22 +98,29 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     await hass.http.async_register_static_paths(
         [
             StaticPathConfig(
-                "/zeitachse_static",
+                FRONTEND_URL_PATH,
                 hass.config.path("custom_components/zeitachse/frontend"),
                 False,
             )
         ]
     )
-    panel_custom.async_register_panel(
+    integration = await async_get_integration(hass, DOMAIN)
+    panel_module_url = f"{FRONTEND_URL_PATH}/zeitachse-panel.js?v={integration.version}"
+    await panel_custom.async_register_panel(
         hass,
         webcomponent_name="zeitachse-panel",
         frontend_url_path="zeitachse",
-        module_url="/zeitachse_static/zeitachse-panel.js",
+        module_url=panel_module_url,
         sidebar_title="Zeitachse",
         sidebar_icon="mdi:timeline-clock",
         require_admin=False,
         config={},
     )
+    card_module_url = f"{FRONTEND_URL_PATH}/zeitachse-card.js?v={integration.version}"
+    if hasattr(frontend, "async_add_extra_js_url"):
+        frontend.async_add_extra_js_url(hass, card_module_url)
+    elif hasattr(frontend, "add_extra_js_url"):
+        frontend.add_extra_js_url(hass, card_module_url)
     hass.data[DOMAIN]["panel_registered"] = True
 
 
