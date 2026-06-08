@@ -35,6 +35,12 @@ PANEL_REGISTRATION_RETRY_DELAY = 30
 FRONTEND_URL_PATH = "/zeitachse_static"
 
 
+async def _maybe_await(value: Any) -> None:
+    """Await value when it is awaitable."""
+    if inspect.isawaitable(value):
+        await value
+
+
 class TrackingManager:
     """Manage periodic snapshot collection."""
 
@@ -117,13 +123,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         require_admin=False,
         config={},
     )
-    if inspect.isawaitable(panel_registration):
-        await panel_registration
+    await _maybe_await(panel_registration)
     card_module_url = f"{FRONTEND_URL_PATH}/zeitachse-card.js?v={integration.version}"
     if hasattr(frontend, "async_add_extra_js_url"):
         add_result = frontend.async_add_extra_js_url(hass, card_module_url)
-        if inspect.isawaitable(add_result):
-            await add_result
+        await _maybe_await(add_result)
     elif hasattr(frontend, "add_extra_js_url"):
         frontend.add_extra_js_url(hass, card_module_url)
     hass.data[DOMAIN]["panel_registered"] = True

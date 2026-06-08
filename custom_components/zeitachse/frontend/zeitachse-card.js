@@ -64,7 +64,9 @@ class ZeitachseCard extends HTMLElement {
 
   _initMap() {
     if (!window.L || this.map) return;
-    this.map = window.L.map(this.shadowRoot.getElementById("map")).setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
+    const mapElement = this.shadowRoot.getElementById("map");
+    if (!mapElement) return;
+    this.map = window.L.map(mapElement).setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
     window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(this.map);
