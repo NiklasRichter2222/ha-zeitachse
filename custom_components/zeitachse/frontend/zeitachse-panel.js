@@ -1,3 +1,6 @@
+import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
+import { toPoint } from "./map-utils.js";
+
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
 
@@ -9,6 +12,11 @@ class ZeitachsePanel extends HTMLElement {
     this.timelineByPerson = new Map();
     this.map = null;
     this.layers = [];
+  }
+
+  disconnectedCallback() {
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
   }
 
   set hass(hass) {
@@ -28,6 +36,7 @@ class ZeitachsePanel extends HTMLElement {
         #map { flex: 1; min-height: 500px; border-radius: 8px; }
         .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
+        ${LEAFLET_SHADOW_CSS}
       </style>
       <div class="layout">
         <div class="controls" id="controls"></div>
@@ -42,6 +51,9 @@ class ZeitachsePanel extends HTMLElement {
     window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(this.map);
+    requestAnimationFrame(() => this.map?.invalidateSize(true));
+    this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
+    this._resizeObserver.observe(this.shadowRoot.getElementById("map"));
   }
 
   async _load() {
@@ -109,8 +121,8 @@ class ZeitachsePanel extends HTMLElement {
     for (const person of this.people.filter((it) => it.active)) {
       const timeline = this.timelineByPerson.get(person.entity_id) || [];
       const points = timeline
-        .map((entry) => [entry.latitude, entry.longitude])
-        .filter((entry) => typeof entry[0] === "number" && typeof entry[1] === "number");
+        .map((entry) => toPoint(entry))
+        .filter((entry) => entry !== null);
 
       if (points.length === 0) continue;
 
@@ -126,7 +138,10 @@ class ZeitachsePanel extends HTMLElement {
 
     if (latest) {
       this.map.setView(latest, 12);
+    } else {
+      this.map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
     }
+    this.map.invalidateSize(true);
   }
 
   static get properties() {
