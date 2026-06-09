@@ -311,18 +311,22 @@ class ZeitachseCard extends HTMLElement {
     const settingsSection = document.createElement("div");
     settingsSection.className = "stay-settings";
     settingsSection.innerHTML = `
-      <div class="stay-settings-title">Aufenthalt-Erkennung</div>
+      <div class="stay-settings-title">Aufenthalts-Erkennung</div>
       <label class="stay-setting">
         <span>Min. Snapshots</span>
-        <input type="number" min="${MIN_STAY_MIN_SNAPSHOTS}" max="${MAX_STAY_MIN_SNAPSHOTS}" step="1" value="${this.staySettings.min_snapshots}">
+        <input class="stay-min-snapshots" type="number" min="${MIN_STAY_MIN_SNAPSHOTS}" max="${MAX_STAY_MIN_SNAPSHOTS}" step="1" value="${this.staySettings.min_snapshots}">
       </label>
       <label class="stay-setting">
         <span>Abweichung (m)</span>
-        <input type="number" min="${MIN_STAY_DISTANCE_METERS}" max="${MAX_STAY_DISTANCE_METERS}" step="1" value="${this.staySettings.distance_meters}">
+        <input class="stay-distance-meters" type="number" min="${MIN_STAY_DISTANCE_METERS}" max="${MAX_STAY_DISTANCE_METERS}" step="1" value="${this.staySettings.distance_meters}">
       </label>
     `;
-    const minSnapshotsInput = settingsSection.querySelectorAll("input")[0];
-    const distanceInput = settingsSection.querySelectorAll("input")[1];
+    const minSnapshotsInput = settingsSection.querySelector(".stay-min-snapshots");
+    const distanceInput = settingsSection.querySelector(".stay-distance-meters");
+    if (!minSnapshotsInput || !distanceInput) {
+      controls.appendChild(settingsSection);
+      return;
+    }
     const applyStaySettings = async () => {
       const previous = { ...this.staySettings };
       const next = this._normalizeStaySettings({

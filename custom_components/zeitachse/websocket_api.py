@@ -121,6 +121,11 @@ async def _get_person_colors(runtime: ZeitachseRuntimeData, user_id: str) -> dic
     }
 
 
+def _clamp(value: int, minimum: int, maximum: int) -> int:
+    """Clamp value to bounds."""
+    return max(minimum, min(maximum, value))
+
+
 def _coerce_stay_settings(raw: Any) -> dict[str, int]:
     """Normalize stay detection settings."""
     if not isinstance(raw, dict):
@@ -135,8 +140,8 @@ def _coerce_stay_settings(raw: Any) -> dict[str, int]:
     if not isinstance(distance_meters, int):
         distance_meters = DEFAULT_STAY_DISTANCE_METERS
     return {
-        "min_snapshots": max(MIN_STAY_MIN_SNAPSHOTS, min(MAX_STAY_MIN_SNAPSHOTS, min_snapshots)),
-        "distance_meters": max(MIN_STAY_DISTANCE_METERS, min(MAX_STAY_DISTANCE_METERS, distance_meters)),
+        "min_snapshots": _clamp(min_snapshots, MIN_STAY_MIN_SNAPSHOTS, MAX_STAY_MIN_SNAPSHOTS),
+        "distance_meters": _clamp(distance_meters, MIN_STAY_DISTANCE_METERS, MAX_STAY_DISTANCE_METERS),
     }
 
 
