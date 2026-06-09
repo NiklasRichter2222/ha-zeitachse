@@ -19,6 +19,7 @@ MAX_SNAPSHOTS_PER_PERSON = 10000
 
 WS_LIST_PEOPLE = "zeitachse/list_people"
 WS_SET_ACTIVE_PEOPLE = "zeitachse/set_active_people"
+WS_SET_PERSON_COLORS = "zeitachse/set_person_colors"
 WS_GET_TIMELINE = "zeitachse/get_timeline"
 
 COLOR_PALETTE = [
