@@ -255,6 +255,7 @@ class ZeitachseBaseCard extends HTMLElement {
         } catch (_error) {
           if (version !== this._poiLookupVersion) return;
           this.poiByPoint.set(key, null);
+          console.debug("[zeitachse-card] POI lookup failed", _error);
         }
       })
     );
@@ -368,6 +369,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       this._mapInitFailed = false;
       return true;
     } catch (_error) {
+      console.error("[zeitachse-map-card] Failed to initialize map", _error);
       this._mapInitFailed = true;
       return false;
     }
@@ -443,7 +445,20 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         weight: 2,
       }).addTo(this.map);
       const poiLabel = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
-      stayMarker.bindPopup(`<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}`);
+      const poiLink = poi?.url
+        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+        : "";
+      stayMarker.bindPopup(
+        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${poiLink}`
+      );
+      if (poi?.name) {
+        stayMarker.bindTooltip(escapeHtml(poi.name), {
+          permanent: true,
+          direction: "top",
+          offset: [0, -8],
+          className: "zeitachse-poi-label",
+        });
+      }
       this.layers.push(stayMarker);
     }
 
@@ -602,7 +617,7 @@ class ZeitachseCardEditor extends HTMLElement {
 
   _personOptions() {
     const states = this._hass?.states || {};
-    const locale = this._hass?.locale?.language || navigator.language || "de-DE";
+    const locale = this._hass?.locale?.language || navigator.language || "en-US";
     return Object.values(states)
       .filter((state) => state.entity_id?.startsWith("person."))
       .map((state) => ({ entity_id: state.entity_id, name: state.attributes?.friendly_name || state.entity_id }))

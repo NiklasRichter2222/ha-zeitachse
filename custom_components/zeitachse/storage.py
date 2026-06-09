@@ -60,7 +60,7 @@ class EncryptedSnapshotStorage:
         snapshots.append(snapshot)
         if len(snapshots) > MAX_SNAPSHOTS_PER_PERSON:
             del snapshots[:-MAX_SNAPSHOTS_PER_PERSON]
-        await self.async_replace(data)
+        await self._async_persist(data)
 
     async def async_get_person_timeline(self, person_entity_id: str) -> list[dict[str, Any]]:
         """Return snapshots for one person."""
@@ -75,7 +75,11 @@ class EncryptedSnapshotStorage:
             if isinstance(key, str)
         }
         self._cache = normalized
-        payload = json.dumps(normalized, separators=(",", ":")).encode()
+        await self._async_persist(normalized)
+
+    async def _async_persist(self, data: dict[str, list[dict[str, Any]]]) -> None:
+        """Persist snapshot payload encrypted on disk."""
+        payload = json.dumps(data, separators=(",", ":")).encode()
         encrypted = self._fernet.encrypt(payload)
 
         path = Path(self._file_path)

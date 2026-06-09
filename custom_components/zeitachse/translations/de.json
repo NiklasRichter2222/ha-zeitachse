@@ -6,7 +6,7 @@
     "step": {
       "user": {
         "title": "Zeitachse einrichten",
-        "description": "Wähle Personen und das Snapshot-Intervall. Ohne Auswahl wird niemand getrackt.",
+        "description": "Wähle Personen und das Snapshot-Intervall. Ohne Auswahl wird niemand getrackt. Wenn „gespeicherte Zeitachsen-Daten ersetzen\" aktiv ist, wird beim Speichern der gesamte Verlauf gelöscht.",
         "data": {
           "name": "Name",
           "tracked_persons": "Zu trackende Personen",
@@ -24,6 +24,7 @@
     "step": {
       "init": {
         "title": "Zeitachse Optionen",
+        "description": "Änderungen aktualisieren das Tracking-Verhalten. Wenn „gespeicherte Zeitachsen-Daten ersetzen\" aktiv ist, wird beim Speichern der gesamte Verlauf unwiderruflich gelöscht.",
         "data": {
           "name": "Name",
           "tracked_persons": "Zu trackende Personen",
