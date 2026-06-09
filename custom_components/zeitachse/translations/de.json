@@ -14,7 +14,8 @@
           "enable_dashboard": "Dashboard in der Seitenleiste aktivieren",
           "person_colors": "Personenfarben (JSON: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Aufenthalts-Erkennung: Mindestanzahl Snapshots",
-          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)"
+          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)",
+          "replace_tracking_data": "Beim Speichern alle gespeicherten Zeitachsen-Daten ersetzen"
         }
       }
     }
@@ -30,7 +31,8 @@
           "enable_dashboard": "Dashboard in der Seitenleiste aktivieren",
           "person_colors": "Personenfarben (JSON: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Aufenthalts-Erkennung: Mindestanzahl Snapshots",
-          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)"
+          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)",
+          "replace_tracking_data": "Beim Speichern alle gespeicherten Zeitachsen-Daten ersetzen"
         }
       }
     }

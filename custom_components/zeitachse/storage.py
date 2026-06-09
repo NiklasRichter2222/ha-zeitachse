@@ -60,18 +60,27 @@ class EncryptedSnapshotStorage:
         snapshots.append(snapshot)
         if len(snapshots) > MAX_SNAPSHOTS_PER_PERSON:
             del snapshots[:-MAX_SNAPSHOTS_PER_PERSON]
-
-        payload = json.dumps(data, separators=(",", ":")).encode()
-        encrypted = self._fernet.encrypt(payload)
-
-        path = Path(self._file_path)
-        await self._hass.async_add_executor_job(lambda: path.parent.mkdir(parents=True, exist_ok=True))
-        await self._hass.async_add_executor_job(path.write_bytes, encrypted)
+        await self.async_replace(data)
 
     async def async_get_person_timeline(self, person_entity_id: str) -> list[dict[str, Any]]:
         """Return snapshots for one person."""
         data = await self.async_load()
         return list(data.get(person_entity_id, []))
+
+    async def async_replace(self, data: dict[str, list[dict[str, Any]]]) -> None:
+        """Replace complete snapshot payload and persist it."""
+        normalized = {
+            key: value if isinstance(value, list) else []
+            for key, value in data.items()
+            if isinstance(key, str)
+        }
+        self._cache = normalized
+        payload = json.dumps(normalized, separators=(",", ":")).encode()
+        encrypted = self._fernet.encrypt(payload)
+
+        path = Path(self._file_path)
+        await self._hass.async_add_executor_job(lambda: path.parent.mkdir(parents=True, exist_ok=True))
+        await self._hass.async_add_executor_job(path.write_bytes, encrypted)
 
 
 class UserPreferenceStorage:

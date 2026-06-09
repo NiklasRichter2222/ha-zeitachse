@@ -14,7 +14,8 @@
           "enable_dashboard": "Enable dashboard in sidebar",
           "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Stay detection: minimum snapshots",
-          "stay_distance_meters": "Stay detection: distance tolerance (meters)"
+          "stay_distance_meters": "Stay detection: distance tolerance (meters)",
+          "replace_tracking_data": "Replace all saved timeline data on save"
         }
       }
     }
@@ -30,7 +31,8 @@
           "enable_dashboard": "Enable dashboard in sidebar",
           "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Stay detection: minimum snapshots",
-          "stay_distance_meters": "Stay detection: distance tolerance (meters)"
+          "stay_distance_meters": "Stay detection: distance tolerance (meters)",
+          "replace_tracking_data": "Replace all saved timeline data on save"
         }
       }
     }

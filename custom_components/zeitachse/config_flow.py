@@ -18,6 +18,7 @@ from .const import (
     CONF_ENCRYPTION_KEY,
     CONF_INTERVAL_MINUTES,
     CONF_PERSON_COLORS,
+    CONF_REPLACE_TRACKING_DATA,
     CONF_STAY_DISTANCE_METERS,
     CONF_STAY_MIN_SNAPSHOTS,
     CONF_TRACKED_PERSONS,
@@ -30,7 +31,9 @@ from .const import (
     MAX_STAY_MIN_SNAPSHOTS,
     MIN_STAY_DISTANCE_METERS,
     MIN_STAY_MIN_SNAPSHOTS,
+    SNAPSHOT_STORAGE_FILE,
 )
+from .storage import EncryptedSnapshotStorage
 
 
 def _is_valid_hex_color(value: Any) -> bool:
@@ -115,6 +118,10 @@ def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
                     step=1,
                 )
             ),
+            vol.Optional(
+                CONF_REPLACE_TRACKING_DATA,
+                default=False,
+            ): selector.BooleanSelector(),
         }
     )
 
@@ -167,6 +174,13 @@ class ZeitachseOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             tracked_persons = user_input.get(CONF_TRACKED_PERSONS, [])
+            if user_input.get(CONF_REPLACE_TRACKING_DATA):
+                storage = EncryptedSnapshotStorage(
+                    self.hass,
+                    SNAPSHOT_STORAGE_FILE,
+                    self._config_entry.data[CONF_ENCRYPTION_KEY],
+                )
+                await storage.async_replace({})
             return self.async_create_entry(
                 title="",
                 data={
