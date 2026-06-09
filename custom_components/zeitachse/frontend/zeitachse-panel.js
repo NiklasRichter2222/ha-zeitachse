@@ -98,7 +98,7 @@ class ZeitachsePanel extends HTMLElement {
         .range-btn { border: 1px solid var(--divider-color); background: transparent; border-radius: 14px; padding: 4px 10px; cursor: pointer; }
         .range-btn.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
         .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-        .person-name { flex: 1; min-width: 0; }
+        .person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
         .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
         .summary { color: var(--secondary-text-color); font-size: 0.9rem; margin-top: 8px; }
