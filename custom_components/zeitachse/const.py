@@ -10,6 +10,7 @@ CONF_ENCRYPTION_KEY = "encryption_key"
 CONF_PERSON_COLORS = "person_colors"
 CONF_STAY_MIN_SNAPSHOTS = "stay_min_snapshots"
 CONF_STAY_DISTANCE_METERS = "stay_distance_meters"
+CONF_REPLACE_TRACKING_DATA = "replace_tracking_data"
 
 DEFAULT_INTERVAL_MINUTES = 5
 DEFAULT_ENABLE_DASHBOARD = True

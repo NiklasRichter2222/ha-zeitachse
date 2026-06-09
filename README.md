@@ -38,13 +38,13 @@ Bei der Einrichtung/Optionen:
 
 - Bei aktivierter Option **Dashboard in der Seitenleiste** erscheint links ein Eintrag **Zeitachse**.
 - Für ein bestehendes Dashboard können folgende Karten genutzt werden:
-  - `zeitachse-card` (Karte + Timeline kombiniert)
   - `zeitachse-map-card` (nur Karte)
   - `zeitachse-timeline-card` (nur Timeline)
-- In allen Karten lassen sich Personen, Farben und Zeitraum direkt in den Karten-Controls anpassen.
-- Die Zeitraum-Auswahl steuert Kartenanzeige und/oder Aufenthaltsliste je nach Kartentyp.
+- `zeitachse-timeline-card` zeigt genau eine Person (Konfiguration über Karten-Settings oder YAML-Attribut `person`) und ist standardmäßig `2` Rasterzeilen hoch (`height_rows` konfigurierbar, Inhalt scrollbar).
+- `zeitachse-map-card` unterstützt YAML-Optionen `people`, `range`, `center`, `zoom`, `interactive` und zeigt eine reduzierte Legende (Name + Farbe).
 - Die Aufenthaltsregeln werden ebenfalls in den Integrations-Optionen gesetzt:
   - Mindestanzahl an Snapshots, ab der ein Aufenthalt als „verweilend“ zählt
   - Erlaubte Positions-Abweichung in Metern zwischen Snapshots, die noch als gleicher Ort gelten
+- In den Integrations-Optionen gibt es zusätzlich den Schalter **„gespeicherte Zeitachsen-Daten ersetzen“**, um beim Speichern alle bestehenden Verlaufspunkte zu löschen.
 
 Ohne ausgewählte Personen wird niemand getrackt.

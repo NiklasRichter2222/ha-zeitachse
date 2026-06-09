@@ -6,7 +6,7 @@
     "step": {
       "user": {
         "title": "Set up Zeitachse",
-        "description": "Select people and snapshot interval. Without selection, no one is tracked.",
+        "description": "Select people and snapshot interval. Without selection, no one is tracked. Enabling \"replace tracking data\" clears all saved timeline history on save.",
         "data": {
           "name": "Name",
           "tracked_persons": "People to track",
@@ -14,7 +14,8 @@
           "enable_dashboard": "Enable dashboard in sidebar",
           "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Stay detection: minimum snapshots",
-          "stay_distance_meters": "Stay detection: distance tolerance (meters)"
+          "stay_distance_meters": "Stay detection: distance tolerance (meters)",
+          "replace_tracking_data": "Replace all saved timeline data on save"
         }
       }
     }
@@ -23,6 +24,7 @@
     "step": {
       "init": {
         "title": "Zeitachse options",
+        "description": "Changing settings updates tracking behavior. Enabling \"replace tracking data\" irreversibly clears saved timeline history on save.",
         "data": {
           "name": "Name",
           "tracked_persons": "People to track",
@@ -30,7 +32,8 @@
           "enable_dashboard": "Enable dashboard in sidebar",
           "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Stay detection: minimum snapshots",
-          "stay_distance_meters": "Stay detection: distance tolerance (meters)"
+          "stay_distance_meters": "Stay detection: distance tolerance (meters)",
+          "replace_tracking_data": "Replace all saved timeline data on save"
         }
       }
     }

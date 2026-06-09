@@ -6,7 +6,7 @@
     "step": {
       "user": {
         "title": "Zeitachse einrichten",
-        "description": "Wähle Personen und das Snapshot-Intervall. Ohne Auswahl wird niemand getrackt.",
+        "description": "Wähle Personen und das Snapshot-Intervall. Ohne Auswahl wird niemand getrackt. Wenn „gespeicherte Zeitachsen-Daten ersetzen\" aktiv ist, wird beim Speichern der gesamte Verlauf gelöscht.",
         "data": {
           "name": "Name",
           "tracked_persons": "Zu trackende Personen",
@@ -14,7 +14,8 @@
           "enable_dashboard": "Dashboard in der Seitenleiste aktivieren",
           "person_colors": "Personenfarben (JSON: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Aufenthalts-Erkennung: Mindestanzahl Snapshots",
-          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)"
+          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)",
+          "replace_tracking_data": "Beim Speichern alle gespeicherten Zeitachsen-Daten ersetzen"
         }
       }
     }
@@ -23,6 +24,7 @@
     "step": {
       "init": {
         "title": "Zeitachse Optionen",
+        "description": "Änderungen aktualisieren das Tracking-Verhalten. Wenn „gespeicherte Zeitachsen-Daten ersetzen\" aktiv ist, wird beim Speichern der gesamte Verlauf unwiderruflich gelöscht.",
         "data": {
           "name": "Name",
           "tracked_persons": "Zu trackende Personen",
@@ -30,7 +32,8 @@
           "enable_dashboard": "Dashboard in der Seitenleiste aktivieren",
           "person_colors": "Personenfarben (JSON: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Aufenthalts-Erkennung: Mindestanzahl Snapshots",
-          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)"
+          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)",
+          "replace_tracking_data": "Beim Speichern alle gespeicherten Zeitachsen-Daten ersetzen"
         }
       }
     }

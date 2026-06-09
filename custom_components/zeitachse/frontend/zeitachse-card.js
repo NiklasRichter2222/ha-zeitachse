@@ -3,6 +3,7 @@ import { haversineMeters, toPoint, toTimestamp } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
+const DEFAULT_TIMELINE_HEIGHT_ROWS = 2;
 const LEAFLET_WAIT_MAX_ATTEMPTS = 10;
 const LEAFLET_WAIT_DELAY_MS = 500;
 const RANGE_OPTIONS = ["1h", "1d", "1w", "1m", "1y"];
@@ -35,36 +36,48 @@ function pointKey(point) {
   return `${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
 }
 
-class ZeitachseCard extends HTMLElement {
+function normalizeRange(value) {
+  return RANGE_OPTIONS.includes(value) ? value : "1d";
+}
+
+function normalizeTimelineHeightRows(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_TIMELINE_HEIGHT_ROWS;
+  return Math.max(1, Math.round(number));
+}
+
+function normalizeCenter(value) {
+  if (Array.isArray(value) && value.length === 2) {
+    const lat = Number(value[0]);
+    const lon = Number(value[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return [lat, lon];
+    }
+  }
+  return [...DEFAULT_MAP_CENTER];
+}
+
+function normalizeZoom(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_MAP_ZOOM;
+  return Math.max(1, Math.min(22, Math.round(number)));
+}
+
+class ZeitachseBaseCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this.people = [];
     this.timelineByPerson = new Map();
-    this.map = null;
-    this.layers = [];
     this.stays = [];
     this.poiByPoint = new Map();
-    this._loaded = false;
-    this._mapInitFailed = false;
     this._poiLookupVersion = 0;
+    this._loaded = false;
     this.selectedRange = "1d";
-    this.mode = "combined";
     this.staySettings = {
       min_snapshots: DEFAULT_STAY_MIN_SNAPSHOTS,
       distance_meters: DEFAULT_STAY_DISTANCE_METERS,
     };
-  }
-
-  disconnectedCallback() {
-    this._resizeObserver?.disconnect();
-    this._resizeObserver = null;
-  }
-
-  setConfig(config) {
-    this.config = config || {};
-    const requestedMode = this.config.mode;
-    this.mode = ["map", "timeline", "combined"].includes(requestedMode) ? requestedMode : "combined";
   }
 
   set hass(hass) {
@@ -81,107 +94,15 @@ class ZeitachseCard extends HTMLElement {
     }
   }
 
-  getCardSize() {
-    if (this.mode === "map") return 6;
-    if (this.mode === "timeline") return 5;
-    return 8;
-  }
-
-  _hasMapView() {
-    return this.mode === "map" || this.mode === "combined";
-  }
-
-  _hasTimelineView() {
-    return this.mode === "timeline" || this.mode === "combined";
-  }
-
-  _renderShell() {
-    const mapHtml = this._hasMapView() ? '<div id="map"></div>' : "";
-    const timelineHtml = this._hasTimelineView() ? '<div class="stay-list" id="stay-list"></div>' : "";
-    const contentClass = this.mode === "combined" ? "content combined" : `content ${this.mode}`;
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        ha-card { padding: 12px; }
-        .layout { display: flex; min-height: 560px; gap: 12px; }
-        .controls { width: 280px; overflow: auto; border: 1px solid var(--divider-color); border-radius: 8px; padding: 8px; }
-        .range-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-        .range-btn { border: 1px solid var(--divider-color); background: transparent; border-radius: 14px; padding: 4px 10px; cursor: pointer; }
-        .range-btn.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
-        .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-        .person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .dot { width: 12px; height: 12px; border-radius: 50%; }
-        .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
-        .summary { color: var(--secondary-text-color); font-size: 0.9rem; margin-top: 8px; }
-        .status { margin-bottom: 12px; color: var(--secondary-text-color); }
-        .content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-        .content.map #map { min-height: 520px; }
-        .content.combined #map { flex: 1; min-height: 320px; }
-        .content.timeline .stay-list { min-height: 520px; }
-        #map { border-radius: 8px; }
-        .stay-list { flex: 1; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; overflow: auto; min-height: 220px; }
-        .stay-title { font-weight: 600; margin-bottom: 8px; }
-        .stay-item { border-top: 1px solid var(--divider-color); padding: 8px 0; }
-        .stay-item:first-of-type { border-top: none; padding-top: 0; }
-        .stay-empty { color: var(--secondary-text-color); }
-        .stay-meta { color: var(--secondary-text-color); font-size: 0.9rem; }
-        ${LEAFLET_SHADOW_CSS}
-      </style>
-      <ha-card>
-        <div class="status" id="status">Zeitachse lädt…</div>
-        <div class="layout">
-          <div class="controls" id="controls"></div>
-          <div class="${contentClass}">
-            ${mapHtml}
-            ${timelineHtml}
-          </div>
-        </div>
-      </ha-card>
-    `;
+  setConfig(config) {
+    this.config = config || {};
+    this.selectedRange = normalizeRange(this.config.range);
   }
 
   _showStatus(message) {
     const status = this.shadowRoot.getElementById("status");
     if (status) {
       status.textContent = message;
-    }
-  }
-
-  async _waitForLeaflet() {
-    for (let attempt = 1; attempt <= LEAFLET_WAIT_MAX_ATTEMPTS; attempt += 1) {
-      if (window.L) {
-        if (attempt > 1) {
-          console.debug(`[zeitachse-card] Leaflet became available after ${attempt} attempts`);
-        }
-        return true;
-      }
-      console.debug(`[zeitachse-card] Waiting for Leaflet (${attempt}/${LEAFLET_WAIT_MAX_ATTEMPTS})`);
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, LEAFLET_WAIT_DELAY_MS);
-      });
-    }
-    return false;
-  }
-
-  _initMap() {
-    if (!window.L || this.map) return false;
-    const mapElement = this.shadowRoot.getElementById("map");
-    if (!mapElement) return false;
-    try {
-      this.map = window.L.map(mapElement).setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
-      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(this.map);
-      requestAnimationFrame(() => this.map?.invalidateSize(true));
-      this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
-      this._resizeObserver.observe(mapElement);
-      console.debug("[zeitachse-card] Map initialized");
-      this._mapInitFailed = false;
-      return true;
-    } catch (error) {
-      console.error("[zeitachse-card] Failed to initialize map", error);
-      this._mapInitFailed = true;
-      return false;
     }
   }
 
@@ -209,57 +130,6 @@ class ZeitachseCard extends HTMLElement {
     return rangeStartDate.toISOString();
   }
 
-  async _load() {
-    if (!this._hass) return;
-    if (this._hasMapView()) {
-      const leafletReady = await this._waitForLeaflet();
-      if (!leafletReady || !this._initMap()) {
-        this._showStatus("Map unavailable: Leaflet failed to load.");
-        this._mapInitFailed = true;
-        console.error("[zeitachse-card] Leaflet unavailable; map rendering disabled");
-      }
-    }
-
-    try {
-      const result = await this._hass.callWS({ type: "zeitachse/list_people" });
-      this.people = result.people || [];
-      this.staySettings = this._normalizeStaySettings(result.stay_settings);
-      console.debug(`[zeitachse-card] Loaded ${this.people.length} people`);
-      await this._loadTimelines();
-      this._renderControls();
-      await this._refreshStaysAndPoi();
-      this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine Personen gefunden");
-    } catch (error) {
-      console.error("[zeitachse-card] Failed to load people/timeline data", error);
-      this._showStatus(`Network error while loading timeline: ${error?.message || error}`);
-    }
-  }
-
-  async _loadTimelines() {
-    const active = this.people.filter((person) => person.active);
-    const start = this._rangeStart();
-    await Promise.all(
-      active.map(async (person) => {
-        const timeline = await this._hass.callWS({
-          type: "zeitachse/get_timeline",
-          entity_id: person.entity_id,
-          start,
-        });
-        this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
-        console.debug(
-          `[zeitachse-card] Loaded ${this.timelineByPerson.get(person.entity_id).length} snapshots for ${person.entity_id}`
-        );
-      })
-    );
-  }
-
-  async _setRange(range) {
-    this.selectedRange = range;
-    await this._loadTimelines();
-    this._renderControls();
-    await this._refreshStaysAndPoi();
-  }
-
   _normalizeStaySettings(settings) {
     const minSnapshots = Number(settings?.min_snapshots);
     const distanceMeters = Number(settings?.distance_meters);
@@ -275,178 +145,45 @@ class ZeitachseCard extends HTMLElement {
     };
   }
 
-  _renderControls() {
-    const controls = this.shadowRoot.getElementById("controls");
-    if (!controls) return;
-    controls.innerHTML = "";
-
-    const rangeRow = document.createElement("div");
-    rangeRow.className = "range-row";
-    for (const range of RANGE_OPTIONS) {
-      const button = document.createElement("button");
-      button.className = `range-btn ${this.selectedRange === range ? "active" : ""}`;
-      button.type = "button";
-      button.textContent = RANGE_LABELS[range] || range;
-      button.addEventListener("click", async () => {
-        if (this.selectedRange === range) return;
-        try {
-          await this._setRange(range);
-        } catch (error) {
-          console.error("[zeitachse-card] Failed to update range", error);
-          this._showStatus(`Network error while updating range: ${error?.message || error}`);
-        }
-      });
-      rangeRow.appendChild(button);
+  _resolvePeople(allPeople) {
+    const selected = this.config.people;
+    if (!Array.isArray(selected) || !selected.length) {
+      return allPeople.filter((person) => person.active);
     }
-    controls.appendChild(rangeRow);
-
-    const pointCount = this.people
-      .filter((it) => it.active)
-      .reduce((sum, person) => sum + (this.timelineByPerson.get(person.entity_id)?.length || 0), 0);
-    const summary = document.createElement("div");
-    summary.className = "summary";
-    summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
-    controls.appendChild(summary);
-
-    for (const person of this.people) {
-      const row = document.createElement("div");
-      row.className = "person";
-      row.innerHTML = `
-        <input class="person-active" type="checkbox" ${person.active ? "checked" : ""}>
-        <span class="dot" style="background:${person.color}"></span>
-        <span class="person-name">${escapeHtml(person.name)}</span>
-        <input class="color-picker" type="color" value="${person.color}" aria-label="Farbe für ${escapeHtml(person.name)}">
-      `;
-      row.querySelector(".person-active").addEventListener("change", async (event) => {
-        const isActive = event.target.checked;
-        person.active = isActive;
-        try {
-          await this._hass.callWS({
-            type: "zeitachse/set_active_people",
-            active_people: this.people.filter((it) => it.active).map((it) => it.entity_id),
-          });
-          if (person.active) {
-            const timeline = await this._hass.callWS({
-              type: "zeitachse/get_timeline",
-              entity_id: person.entity_id,
-              start: this._rangeStart(),
-            });
-            this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
-            console.debug(
-              `[zeitachse-card] Loaded ${this.timelineByPerson.get(person.entity_id).length} snapshots for ${person.entity_id}`
-            );
-          }
-        } catch (error) {
-          person.active = !isActive;
-          event.target.checked = person.active;
-          console.error("[zeitachse-card] Failed to update active people", error);
-          this._showStatus(`Network error while updating active people: ${error?.message || error}`);
-        }
-        this._renderControls();
-        await this._refreshStaysAndPoi();
-      });
-      row.querySelector(".color-picker").addEventListener("change", async (event) => {
-        const previousColor = person.color;
-        const nextColor = event.target.value;
-        const dot = row.querySelector(".dot");
-        person.color = nextColor;
-        try {
-          await this._hass.callWS({
-            type: "zeitachse/set_person_colors",
-            person_colors: Object.fromEntries(this.people.map((entry) => [entry.entity_id, entry.color])),
-          });
-          if (dot) {
-            dot.style.background = person.color;
-          }
-        } catch (error) {
-          person.color = previousColor;
-          event.target.value = previousColor;
-          if (dot) {
-            dot.style.background = previousColor;
-          }
-          console.error("[zeitachse-card] Failed to update person colors", error);
-          this._showStatus(`Network error while updating person colors: ${error?.message || error}`);
-        }
-        this._renderMap();
-        this._renderStayList();
-      });
-      controls.appendChild(row);
-    }
+    const selectedSet = new Set(selected);
+    return allPeople.filter((person) => selectedSet.has(person.entity_id));
   }
 
-  _renderMap() {
-    if (!this._hasMapView()) return;
-    if (this._mapInitFailed) {
-      this._showStatus("Map unavailable: Leaflet failed to load.");
-      return;
-    }
-    if (!this.map || !window.L) {
-      console.debug("[zeitachse-card] Skipping map render because map is not ready");
-      return;
-    }
+  async _load() {
+    if (!this._hass) return;
+    const result = await this._hass.callWS({ type: "zeitachse/list_people" });
+    this.staySettings = this._normalizeStaySettings(result.stay_settings);
+    this.people = this._resolvePeople(result.people || []);
+    await this._loadTimelines();
+    await this._refreshStaysAndPoi();
+    this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine passenden Personen gefunden");
+  }
 
-    for (const layer of this.layers) {
-      this.map.removeLayer(layer);
-    }
-    this.layers = [];
-
-    let latest = null;
-    for (const person of this.people.filter((it) => it.active)) {
-      const timeline = this.timelineByPerson.get(person.entity_id) || [];
-      const points = timeline.map((entry) => toPoint(entry)).filter((entry) => entry !== null);
-
-      if (points.length === 0) continue;
-
-      const polyline = window.L.polyline(points, { color: person.color, weight: 4 }).addTo(this.map);
-      this.layers.push(polyline);
-
-      const lastPoint = points[points.length - 1];
-      latest = latest || lastPoint;
-      const marker = window.L.circleMarker(lastPoint, { color: person.color, radius: 7 }).addTo(this.map);
-      marker.bindPopup(`${person.name} (${points.length} Punkte)`);
-      this.layers.push(marker);
-    }
-
-    for (const stay of this.stays) {
-      const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
-      const stayMarker = window.L.circleMarker(stay.point, {
-        radius: 8,
-        color: "#f57c00",
-        fillColor: "#ff9800",
-        fillOpacity: 0.9,
-        weight: 2,
-      }).addTo(this.map);
-      const poiLabel = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
-      const detailsLink = poi?.url
-        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
-        : "";
-      stayMarker.bindPopup(
-        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${detailsLink}`
-      );
-      if (poi?.name) {
-        stayMarker.bindTooltip(escapeHtml(poi.name), {
-          permanent: true,
-          direction: "top",
-          offset: [0, -8],
-          className: "zeitachse-poi-label",
+  async _loadTimelines() {
+    this.timelineByPerson.clear();
+    const start = this._rangeStart();
+    await Promise.all(
+      this.people.map(async (person) => {
+        const timeline = await this._hass.callWS({
+          type: "zeitachse/get_timeline",
+          entity_id: person.entity_id,
+          start,
         });
-      }
-      this.layers.push(stayMarker);
-    }
-
-    if (latest) {
-      this.map.setView(latest, 12);
-    } else {
-      this.map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
-    }
-    this.map.invalidateSize(true);
+        this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
+      })
+    );
   }
 
   _collectStays() {
     const stays = [];
     const minSnapshots = this.staySettings?.min_snapshots ?? DEFAULT_STAY_MIN_SNAPSHOTS;
     const distanceMeters = this.staySettings?.distance_meters ?? DEFAULT_STAY_DISTANCE_METERS;
-    for (const person of this.people.filter((it) => it.active)) {
+    for (const person of this.people) {
       const timeline = [...(this.timelineByPerson.get(person.entity_id) || [])].sort((first, second) => {
         const firstTs = toTimestamp(first);
         const secondTs = toTimestamp(second);
@@ -489,20 +226,11 @@ class ZeitachseCard extends HTMLElement {
     return stays.sort((a, b) => b.start.getTime() - a.start.getTime());
   }
 
-  _formatDuration(durationMs) {
-    const totalMinutes = Math.round(durationMs / 60000);
-    if (totalMinutes < 60) return `${totalMinutes} min`;
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return minutes ? `${hours}h ${minutes}min` : `${hours}h`;
-  }
-
   async _refreshStaysAndPoi() {
     const stays = this._collectStays();
     this.stays = stays;
     await this._loadPoiForStays(stays);
-    this._renderMap();
-    this._renderStayList();
+    this._renderData();
   }
 
   async _loadPoiForStays(stays) {
@@ -524,22 +252,321 @@ class ZeitachseCard extends HTMLElement {
           });
           if (version !== this._poiLookupVersion) return;
           this.poiByPoint.set(key, result?.poi || null);
-        } catch (error) {
+        } catch (_error) {
           if (version !== this._poiLookupVersion) return;
           this.poiByPoint.set(key, null);
-          console.debug("[zeitachse-card] POI lookup failed", error);
+          console.debug("[zeitachse-card] POI lookup failed", _error);
         }
       })
     );
+  }
+
+  _formatDuration(durationMs) {
+    const totalMinutes = Math.round(durationMs / 60000);
+    if (totalMinutes < 60) return `${totalMinutes} min`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes ? `${hours}h ${minutes}min` : `${hours}h`;
+  }
+}
+
+class ZeitachseMapCard extends ZeitachseBaseCard {
+  constructor() {
+    super();
+    this.map = null;
+    this.layers = [];
+    this._mapInitFailed = false;
+    this._defaultCenter = [...DEFAULT_MAP_CENTER];
+    this._defaultZoom = DEFAULT_MAP_ZOOM;
+    this._interactive = true;
+  }
+
+  static getConfigElement() {
+    const editor = document.createElement("zeitachse-card-editor");
+    editor.cardType = "map";
+    return editor;
+  }
+
+  static getStubConfig() {
+    return {
+      type: "custom:zeitachse-map-card",
+      range: "1d",
+      interactive: true,
+    };
+  }
+
+  disconnectedCallback() {
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
+  }
+
+  setConfig(config) {
+    super.setConfig(config);
+    this._defaultCenter = normalizeCenter(this.config.center);
+    this._defaultZoom = normalizeZoom(this.config.zoom);
+    this._interactive = this.config.interactive !== false;
+  }
+
+  getCardSize() {
+    return 6;
+  }
+
+  _renderShell() {
+    this.shadowRoot.innerHTML = `
+      <style>
+        ha-card { padding: 12px; }
+        .status { margin-bottom: 10px; color: var(--secondary-text-color); }
+        #map { height: 420px; border-radius: 8px; }
+        .legend {
+          margin-top: 10px;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          padding: 8px;
+        }
+        .legend-title { font-weight: 600; margin-bottom: 6px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        ${LEAFLET_SHADOW_CSS}
+      </style>
+      <ha-card>
+        <div class="status" id="status">Zeitachse lädt…</div>
+        <div id="map"></div>
+        <div class="legend" id="legend"></div>
+      </ha-card>
+    `;
+  }
+
+  async _waitForLeaflet() {
+    for (let attempt = 1; attempt <= LEAFLET_WAIT_MAX_ATTEMPTS; attempt += 1) {
+      if (window.L) return true;
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, LEAFLET_WAIT_DELAY_MS);
+      });
+    }
+    return false;
+  }
+
+  _initMap() {
+    if (!window.L || this.map) return false;
+    const mapElement = this.shadowRoot.getElementById("map");
+    if (!mapElement) return false;
+    try {
+      this.map = window.L.map(mapElement, {
+        dragging: this._interactive,
+        scrollWheelZoom: this._interactive,
+        doubleClickZoom: this._interactive,
+        boxZoom: this._interactive,
+        keyboard: this._interactive,
+        touchZoom: this._interactive,
+        zoomControl: this._interactive,
+      }).setView(this._defaultCenter, this._defaultZoom);
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(this.map);
+      requestAnimationFrame(() => this.map?.invalidateSize(true));
+      this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
+      this._resizeObserver.observe(mapElement);
+      this._mapInitFailed = false;
+      return true;
+    } catch (_error) {
+      console.error("[zeitachse-map-card] Failed to initialize map", _error);
+      this._mapInitFailed = true;
+      return false;
+    }
+  }
+
+  async _load() {
+    const leafletReady = await this._waitForLeaflet();
+    if (!leafletReady || !this._initMap()) {
+      this._showStatus("Map unavailable: Leaflet failed to load.");
+      this._mapInitFailed = true;
+      return;
+    }
+    await super._load();
+  }
+
+  _renderData() {
+    this._renderMap();
+    this._renderLegend();
+  }
+
+  _renderLegend() {
+    const legend = this.shadowRoot.getElementById("legend");
+    if (!legend) return;
+    if (!this.people.length) {
+      legend.innerHTML = '<div class="legend-title">Legende</div><div>Keine Personen ausgewählt</div>';
+      return;
+    }
+    legend.innerHTML = `
+      <div class="legend-title">Legende</div>
+      ${this.people
+        .map(
+          (person) =>
+            `<div class="legend-item"><span class="dot" style="background:${person.color}"></span><span>${escapeHtml(person.name)}</span></div>`
+        )
+        .join("")}
+    `;
+  }
+
+  _renderMap() {
+    if (this._mapInitFailed) {
+      this._showStatus("Map unavailable: Leaflet failed to load.");
+      return;
+    }
+    if (!this.map || !window.L) return;
+
+    for (const layer of this.layers) {
+      this.map.removeLayer(layer);
+    }
+    this.layers = [];
+
+    let hasData = false;
+    for (const person of this.people) {
+      const timeline = this.timelineByPerson.get(person.entity_id) || [];
+      const points = timeline.map((entry) => toPoint(entry)).filter((entry) => entry !== null);
+      if (!points.length) continue;
+
+      hasData = true;
+      const polyline = window.L.polyline(points, { color: person.color, weight: 4 }).addTo(this.map);
+      this.layers.push(polyline);
+      const lastPoint = points[points.length - 1];
+      const marker = window.L.circleMarker(lastPoint, { color: person.color, radius: 7 }).addTo(this.map);
+      marker.bindPopup(`${person.name} (${points.length} Punkte)`);
+      this.layers.push(marker);
+    }
+
+    for (const stay of this.stays) {
+      const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
+      const stayMarker = window.L.circleMarker(stay.point, {
+        radius: 8,
+        color: "#f57c00",
+        fillColor: "#ff9800",
+        fillOpacity: 0.9,
+        weight: 2,
+      }).addTo(this.map);
+      const poiLabel = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
+      const poiLink = poi?.url
+        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+        : "";
+      stayMarker.bindPopup(
+        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${poiLink}`
+      );
+      if (poi?.name) {
+        stayMarker.bindTooltip(escapeHtml(poi.name), {
+          permanent: true,
+          direction: "top",
+          offset: [0, -8],
+          className: "zeitachse-poi-label",
+        });
+      }
+      this.layers.push(stayMarker);
+    }
+
+    if (!hasData) {
+      this.map.setView(this._defaultCenter, this._defaultZoom);
+    } else if (!this._interactive) {
+      this.map.setView(this._defaultCenter, this._defaultZoom);
+    } else {
+      const group = window.L.featureGroup(this.layers);
+      const bounds = group.getBounds();
+      if (bounds.isValid()) {
+        this.map.fitBounds(bounds, { padding: [20, 20] });
+      }
+    }
+    this.map.invalidateSize(true);
+  }
+}
+
+class ZeitachseTimelineCard extends ZeitachseBaseCard {
+  constructor() {
+    super();
+    this.selectedPersonEntityId = null;
+    this.timelineHeightRows = DEFAULT_TIMELINE_HEIGHT_ROWS;
+  }
+
+  static getConfigElement() {
+    const editor = document.createElement("zeitachse-card-editor");
+    editor.cardType = "timeline";
+    return editor;
+  }
+
+  static getStubConfig() {
+    return {
+      type: "custom:zeitachse-timeline-card",
+      range: "1d",
+      height_rows: DEFAULT_TIMELINE_HEIGHT_ROWS,
+    };
+  }
+
+  setConfig(config) {
+    super.setConfig(config);
+    this.selectedPersonEntityId = this.config.person || null;
+    this.timelineHeightRows = normalizeTimelineHeightRows(this.config.height_rows);
+  }
+
+  getCardSize() {
+    return this.timelineHeightRows;
+  }
+
+  _resolvePeople(allPeople) {
+    const selectedPerson = this.selectedPersonEntityId;
+    if (!selectedPerson) {
+      return [];
+    }
+    return allPeople.filter((person) => person.entity_id === selectedPerson);
+  }
+
+  _renderShell() {
+    const heightPx = this.timelineHeightRows * 56;
+    this.shadowRoot.innerHTML = `
+      <style>
+        ha-card { padding: 12px; }
+        .status { margin-bottom: 10px; color: var(--secondary-text-color); }
+        .stay-list {
+          height: ${heightPx}px;
+          min-height: ${heightPx}px;
+          max-height: ${heightPx}px;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          padding: 10px;
+          overflow: auto;
+        }
+        .stay-title { font-weight: 600; margin-bottom: 8px; }
+        .stay-item { border-top: 1px solid var(--divider-color); padding: 8px 0; }
+        .stay-item:first-of-type { border-top: none; padding-top: 0; }
+        .stay-empty { color: var(--secondary-text-color); }
+        .stay-meta { color: var(--secondary-text-color); font-size: 0.9rem; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; display:inline-block; margin-right:8px; }
+      </style>
+      <ha-card>
+        <div class="status" id="status">Zeitachse lädt…</div>
+        <div class="stay-list" id="stay-list"></div>
+      </ha-card>
+    `;
+  }
+
+  _renderData() {
+    this._renderStayList();
   }
 
   _renderStayList() {
     const container = this.shadowRoot.getElementById("stay-list");
     if (!container) return;
 
+    if (!this.selectedPersonEntityId) {
+      container.innerHTML = '<div class="stay-empty">Bitte in den Karten-Einstellungen eine Person auswählen.</div>';
+      return;
+    }
+
+    const person = this.people[0];
+    if (!person) {
+      container.innerHTML = '<div class="stay-empty">Die ausgewählte Person ist nicht verfügbar oder nicht getrackt.</div>';
+      return;
+    }
+
     const stays = this.stays;
     if (!stays.length) {
-      container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
+      container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
       return;
     }
 
@@ -556,57 +583,200 @@ class ZeitachseCard extends HTMLElement {
           : "";
         return `
           <div class="stay-item">
-            <div><span class="dot" style="background:${stay.person.color}; display:inline-block; margin-right:8px;"></span><strong>${escapeHtml(stay.person.name)}</strong></div>
+            <div><span class="dot" style="background:${stay.person.color}"></span><strong>${escapeHtml(stay.person.name)}</strong></div>
             <div class="stay-meta">${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${this._formatDuration(stay.durationMs)}</div>
             <div class="stay-meta">POI: ${poiName}${poiLink} · ${stay.samples} Snapshots</div>
           </div>
         `;
       })
       .join("");
-    container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div>${content}`;
+    container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div>${content}`;
   }
 }
 
-class ZeitachseMapCard extends ZeitachseCard {
+class ZeitachseCardEditor extends HTMLElement {
   setConfig(config) {
-    super.setConfig({ ...(config || {}), mode: "map" });
+    this._config = config || {};
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  _fireConfigChanged(config) {
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        bubbles: true,
+        composed: true,
+        detail: { config },
+      })
+    );
+  }
+
+  _personOptions() {
+    const states = this._hass?.states || {};
+    const locale = this._hass?.locale?.language || navigator.language || "en-US";
+    return Object.values(states)
+      .filter((state) => state.entity_id?.startsWith("person."))
+      .map((state) => ({ entity_id: state.entity_id, name: state.attributes?.friendly_name || state.entity_id }))
+      .sort((a, b) => a.name.localeCompare(b.name, locale));
+  }
+
+  _renderTimelineEditor() {
+    const personOptions = this._personOptions();
+    const selectedRange = normalizeRange(this._config.range);
+    const selectedRows = normalizeTimelineHeightRows(this._config.height_rows);
+    this.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label>Person
+          <select id="person" style="width:100%;">
+            <option value="">Bitte wählen</option>
+            ${personOptions
+              .map(
+                (person) =>
+                  `<option value="${escapeHtml(person.entity_id)}" ${this._config.person === person.entity_id ? "selected" : ""}>${escapeHtml(person.name)}</option>`
+              )
+              .join("")}
+          </select>
+        </label>
+        <label>Zeitraum
+          <select id="range" style="width:100%;">
+            ${RANGE_OPTIONS.map(
+              (range) => `<option value="${range}" ${selectedRange === range ? "selected" : ""}>${RANGE_LABELS[range]}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label>Höhe (Rasterreihen)
+          <input id="height_rows" type="number" min="1" step="1" value="${selectedRows}" style="width:100%;">
+        </label>
+      </div>
+    `;
+
+    this.querySelector("#person")?.addEventListener("change", (event) => {
+      const next = { ...this._config };
+      if (event.target.value) {
+        next.person = event.target.value;
+      } else {
+        delete next.person;
+      }
+      this._fireConfigChanged(next);
+    });
+    this.querySelector("#range")?.addEventListener("change", (event) => {
+      const next = { ...this._config, range: event.target.value };
+      this._fireConfigChanged(next);
+    });
+    this.querySelector("#height_rows")?.addEventListener("change", (event) => {
+      const next = { ...this._config, height_rows: normalizeTimelineHeightRows(event.target.value) };
+      this._fireConfigChanged(next);
+    });
+  }
+
+  _renderMapEditor() {
+    const personOptions = this._personOptions();
+    const selectedPeople = Array.isArray(this._config.people) ? this._config.people : [];
+    const center = normalizeCenter(this._config.center);
+    const zoom = normalizeZoom(this._config.zoom);
+    const selectedRange = normalizeRange(this._config.range);
+    const interactive = this._config.interactive !== false;
+
+    this.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label>Personen (Strg/Cmd für Mehrfachauswahl)
+          <select id="people" multiple size="6" style="width:100%;">
+            ${personOptions
+              .map(
+                (person) =>
+                  `<option value="${escapeHtml(person.entity_id)}" ${selectedPeople.includes(person.entity_id) ? "selected" : ""}>${escapeHtml(person.name)}</option>`
+              )
+              .join("")}
+          </select>
+        </label>
+        <label>Zeitraum
+          <select id="range" style="width:100%;">
+            ${RANGE_OPTIONS.map(
+              (range) => `<option value="${range}" ${selectedRange === range ? "selected" : ""}>${RANGE_LABELS[range]}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label>Zentrum Breite
+          <input id="center_lat" type="number" step="0.000001" value="${center[0]}" style="width:100%;">
+        </label>
+        <label>Zentrum Länge
+          <input id="center_lon" type="number" step="0.000001" value="${center[1]}" style="width:100%;">
+        </label>
+        <label>Zoom
+          <input id="zoom" type="number" min="1" step="1" value="${zoom}" style="width:100%;">
+        </label>
+        <label>
+          <input id="interactive" type="checkbox" ${interactive ? "checked" : ""}>
+          Interaktive Karte
+        </label>
+      </div>
+    `;
+
+    this.querySelector("#people")?.addEventListener("change", (event) => {
+      const selected = [...event.target.selectedOptions].map((option) => option.value);
+      const next = { ...this._config, people: selected };
+      this._fireConfigChanged(next);
+    });
+    this.querySelector("#range")?.addEventListener("change", (event) => {
+      const next = { ...this._config, range: event.target.value };
+      this._fireConfigChanged(next);
+    });
+
+    const updateCenter = () => {
+      const lat = Number(this.querySelector("#center_lat")?.value);
+      const lon = Number(this.querySelector("#center_lon")?.value);
+      const next = { ...this._config, center: normalizeCenter([lat, lon]) };
+      this._fireConfigChanged(next);
+    };
+
+    this.querySelector("#center_lat")?.addEventListener("change", updateCenter);
+    this.querySelector("#center_lon")?.addEventListener("change", updateCenter);
+    this.querySelector("#zoom")?.addEventListener("change", (event) => {
+      const next = { ...this._config, zoom: normalizeZoom(event.target.value) };
+      this._fireConfigChanged(next);
+    });
+    this.querySelector("#interactive")?.addEventListener("change", (event) => {
+      const next = { ...this._config, interactive: Boolean(event.target.checked) };
+      this._fireConfigChanged(next);
+    });
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+    if (this.cardType === "timeline") {
+      this._renderTimelineEditor();
+      return;
+    }
+    this._renderMapEditor();
   }
 }
 
-class ZeitachseTimelineCard extends ZeitachseCard {
-  setConfig(config) {
-    super.setConfig({ ...(config || {}), mode: "timeline" });
-  }
-}
-
-if (!customElements.get("zeitachse-card")) {
-  customElements.define("zeitachse-card", ZeitachseCard);
-}
 if (!customElements.get("zeitachse-map-card")) {
   customElements.define("zeitachse-map-card", ZeitachseMapCard);
 }
 if (!customElements.get("zeitachse-timeline-card")) {
   customElements.define("zeitachse-timeline-card", ZeitachseTimelineCard);
 }
+if (!customElements.get("zeitachse-card-editor")) {
+  customElements.define("zeitachse-card-editor", ZeitachseCardEditor);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push(
   {
-    type: "zeitachse-card",
-    name: "Zeitachse (Karte + Timeline)",
-    description: "Zeigt Karte und Aufenthalts-Timeline kombiniert an",
-    preview: true,
-  },
-  {
     type: "zeitachse-map-card",
     name: "Zeitachse Karte",
-    description: "Zeigt nur die Karte mit Personen- und Zeitraum-Auswahl",
+    description: "Zeigt die Karte mit YAML-konfigurierbaren Personen, Zeitraum und Ansicht.",
     preview: true,
   },
   {
     type: "zeitachse-timeline-card",
     name: "Zeitachse Timeline",
-    description: "Zeigt nur die Aufenthalts-Timeline mit Personen- und Zeitraum-Auswahl",
+    description: "Zeigt die Timeline für genau eine ausgewählte Person.",
     preview: true,
   }
 );
