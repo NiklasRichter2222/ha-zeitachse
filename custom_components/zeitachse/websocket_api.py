@@ -17,11 +17,13 @@ from .const import (
     COLOR_PALETTE,
     CONF_TRACKED_PERSONS,
     RUNTIME_DATA_KEY,
+    WS_GET_POI,
     WS_GET_TIMELINE,
     WS_LIST_PEOPLE,
     WS_SET_ACTIVE_PEOPLE,
     WS_SET_PERSON_COLORS,
 )
+from .poi_lookup import PoiLookupService
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,10 +37,12 @@ class ZeitachseRuntimeData:
         config_entry: ConfigEntry,
         snapshot_storage: EncryptedSnapshotStorage,
         preferences: UserPreferenceStorage,
+        poi_lookup: PoiLookupService,
     ) -> None:
         self.config_entry = config_entry
         self.snapshot_storage = snapshot_storage
         self.preferences = preferences
+        self.poi_lookup = poi_lookup
 
     @property
     def tracked_persons(self) -> list[str]:
@@ -244,6 +248,25 @@ async def ws_get_timeline(
     connection.send_result(msg["id"], {"timeline": timeline})
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_GET_POI,
+        vol.Required("latitude"): vol.Coerce(float),
+        vol.Required("longitude"): vol.Coerce(float),
+    }
+)
+@websocket_api.async_response
+async def ws_get_poi(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Get POI information for one coordinate."""
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    poi = await runtime.poi_lookup.async_lookup(msg["latitude"], msg["longitude"])
+    connection.send_result(msg["id"], {"poi": poi})
+
+
 async def async_register_websocket_api(
     hass: HomeAssistant,
     runtime: ZeitachseRuntimeData,
@@ -254,3 +277,4 @@ async def async_register_websocket_api(
     websocket_api.async_register_command(hass, ws_set_active_people)
     websocket_api.async_register_command(hass, ws_set_person_colors)
     websocket_api.async_register_command(hass, ws_get_timeline)
+    websocket_api.async_register_command(hass, ws_get_poi)

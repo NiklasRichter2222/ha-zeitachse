@@ -21,6 +21,7 @@ WS_LIST_PEOPLE = "zeitachse/list_people"
 WS_SET_ACTIVE_PEOPLE = "zeitachse/set_active_people"
 WS_SET_PERSON_COLORS = "zeitachse/set_person_colors"
 WS_GET_TIMELINE = "zeitachse/get_timeline"
+WS_GET_POI = "zeitachse/get_poi"
 
 COLOR_PALETTE = [
     "#1f77b4",
