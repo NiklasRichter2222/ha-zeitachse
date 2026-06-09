@@ -13,8 +13,12 @@ const RANGE_LABELS = {
   "1m": "1m",
   "1y": "1j",
 };
-const STAY_DISTANCE_METERS = 75;
-const STAY_MIN_DURATION_MS = 30 * 60 * 1000;
+const DEFAULT_STAY_DISTANCE_METERS = 75;
+const DEFAULT_STAY_MIN_SNAPSHOTS = 6;
+const MIN_STAY_DISTANCE_METERS = 5;
+const MAX_STAY_DISTANCE_METERS = 2000;
+const MIN_STAY_MIN_SNAPSHOTS = 2;
+const MAX_STAY_MIN_SNAPSHOTS = 500;
 
 function escapeHtml(value) {
   return String(value)
@@ -45,6 +49,10 @@ class ZeitachseCard extends HTMLElement {
     this._mapInitFailed = false;
     this._poiLookupVersion = 0;
     this.selectedRange = "1d";
+    this.staySettings = {
+      min_snapshots: DEFAULT_STAY_MIN_SNAPSHOTS,
+      distance_meters: DEFAULT_STAY_DISTANCE_METERS,
+    };
   }
 
   disconnectedCallback() {
@@ -87,6 +95,10 @@ class ZeitachseCard extends HTMLElement {
         .dot { width: 12px; height: 12px; border-radius: 50%; }
         .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
         .summary { color: var(--secondary-text-color); font-size: 0.9rem; margin-top: 8px; }
+        .stay-settings { margin-top: 12px; border-top: 1px solid var(--divider-color); padding-top: 10px; }
+        .stay-settings-title { font-weight: 600; margin-bottom: 8px; }
+        .stay-setting { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; }
+        .stay-setting input { width: 90px; }
         .status { margin-bottom: 12px; color: var(--secondary-text-color); }
         .map-and-list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
         #map { flex: 1; min-height: 320px; border-radius: 8px; }
@@ -193,6 +205,7 @@ class ZeitachseCard extends HTMLElement {
     try {
       const result = await this._hass.callWS({ type: "zeitachse/list_people" });
       this.people = result.people || [];
+      this.staySettings = this._normalizeStaySettings(result.stay_settings);
       console.debug(`[zeitachse-card] Loaded ${this.people.length} people`);
       await this._loadTimelines();
       this._renderControls();
@@ -238,6 +251,31 @@ class ZeitachseCard extends HTMLElement {
     });
   }
 
+  _normalizeStaySettings(settings) {
+    const minSnapshots = Number(settings?.min_snapshots);
+    const distanceMeters = Number(settings?.distance_meters);
+    const normalizedMinSnapshots = Number.isFinite(minSnapshots)
+      ? Math.round(Math.max(MIN_STAY_MIN_SNAPSHOTS, Math.min(MAX_STAY_MIN_SNAPSHOTS, minSnapshots)))
+      : DEFAULT_STAY_MIN_SNAPSHOTS;
+    const normalizedDistanceMeters = Number.isFinite(distanceMeters)
+      ? Math.round(Math.max(MIN_STAY_DISTANCE_METERS, Math.min(MAX_STAY_DISTANCE_METERS, distanceMeters)))
+      : DEFAULT_STAY_DISTANCE_METERS;
+    return {
+      min_snapshots: normalizedMinSnapshots,
+      distance_meters: normalizedDistanceMeters,
+    };
+  }
+
+  async _setStaySettings(settings) {
+    const normalized = this._normalizeStaySettings(settings);
+    const result = await this._hass.callWS({
+      type: "zeitachse/set_stay_settings",
+      min_snapshots: normalized.min_snapshots,
+      distance_meters: normalized.distance_meters,
+    });
+    this.staySettings = this._normalizeStaySettings(result?.stay_settings);
+  }
+
   _renderControls() {
     const controls = this.shadowRoot.getElementById("controls");
     controls.innerHTML = "";
@@ -269,6 +307,56 @@ class ZeitachseCard extends HTMLElement {
     summary.className = "summary";
     summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
     controls.appendChild(summary);
+
+    const settingsSection = document.createElement("div");
+    settingsSection.className = "stay-settings";
+    settingsSection.innerHTML = `
+      <div class="stay-settings-title">Aufenthalts-Erkennung</div>
+      <label class="stay-setting">
+        <span>Min. Snapshots</span>
+        <input class="stay-min-snapshots" type="number" min="${MIN_STAY_MIN_SNAPSHOTS}" max="${MAX_STAY_MIN_SNAPSHOTS}" step="1" value="${this.staySettings.min_snapshots}">
+      </label>
+      <label class="stay-setting">
+        <span>Abweichung (m)</span>
+        <input class="stay-distance-meters" type="number" min="${MIN_STAY_DISTANCE_METERS}" max="${MAX_STAY_DISTANCE_METERS}" step="1" value="${this.staySettings.distance_meters}">
+      </label>
+    `;
+    const minSnapshotsInput = settingsSection.querySelector(".stay-min-snapshots");
+    const distanceInput = settingsSection.querySelector(".stay-distance-meters");
+    if (!minSnapshotsInput || !distanceInput) {
+      controls.appendChild(settingsSection);
+      return;
+    }
+    const applyStaySettings = async () => {
+      const previous = { ...this.staySettings };
+      const next = this._normalizeStaySettings({
+        min_snapshots: Number(minSnapshotsInput.value),
+        distance_meters: Number(distanceInput.value),
+      });
+      if (
+        next.min_snapshots === previous.min_snapshots &&
+        next.distance_meters === previous.distance_meters
+      ) {
+        minSnapshotsInput.value = String(previous.min_snapshots);
+        distanceInput.value = String(previous.distance_meters);
+        return;
+      }
+      this.staySettings = next;
+      try {
+        await this._setStaySettings(next);
+        await this._refreshStaysAndPoi();
+        this._renderControls();
+      } catch (error) {
+        this.staySettings = previous;
+        minSnapshotsInput.value = String(previous.min_snapshots);
+        distanceInput.value = String(previous.distance_meters);
+        console.error("[zeitachse-card] Failed to update stay settings", error);
+        this._showStatus(`Network error while updating stay settings: ${error?.message || error}`);
+      }
+    };
+    minSnapshotsInput.addEventListener("change", applyStaySettings);
+    distanceInput.addEventListener("change", applyStaySettings);
+    controls.appendChild(settingsSection);
 
     for (const person of this.people) {
       const row = document.createElement("label");
@@ -395,6 +483,8 @@ class ZeitachseCard extends HTMLElement {
 
   _collectStays() {
     const stays = [];
+    const minSnapshots = this.staySettings?.min_snapshots ?? DEFAULT_STAY_MIN_SNAPSHOTS;
+    const distanceMeters = this.staySettings?.distance_meters ?? DEFAULT_STAY_DISTANCE_METERS;
     for (const person of this.people.filter((it) => it.active)) {
       const timeline = [...(this.timelineByPerson.get(person.entity_id) || [])].sort((first, second) => {
         const firstTs = toTimestamp(first);
@@ -414,14 +504,14 @@ class ZeitachseCard extends HTMLElement {
           continue;
         }
 
-        if (haversineMeters(current.point, point) <= STAY_DISTANCE_METERS) {
+        if (haversineMeters(current.point, point) <= distanceMeters) {
           current.end = timestamp;
           current.samples += 1;
           continue;
         }
 
         const durationMs = current.end.getTime() - current.start.getTime();
-        if (durationMs >= STAY_MIN_DURATION_MS) {
+        if (current.samples >= minSnapshots) {
           stays.push({ ...current, durationMs });
         }
         current = { person, point, start: timestamp, end: timestamp, samples: 1 };
@@ -429,7 +519,7 @@ class ZeitachseCard extends HTMLElement {
 
       if (current) {
         const durationMs = current.end.getTime() - current.start.getTime();
-        if (durationMs >= STAY_MIN_DURATION_MS) {
+        if (current.samples >= minSnapshots) {
           stays.push({ ...current, durationMs });
         }
       }

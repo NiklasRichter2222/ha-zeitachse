@@ -22,11 +22,18 @@ from .const import (
     WS_LIST_PEOPLE,
     WS_SET_ACTIVE_PEOPLE,
     WS_SET_PERSON_COLORS,
+    WS_SET_STAY_SETTINGS,
 )
 from .poi_lookup import PoiLookupService
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 
 _LOGGER = logging.getLogger(__name__)
+DEFAULT_STAY_MIN_SNAPSHOTS = 6
+DEFAULT_STAY_DISTANCE_METERS = 75
+MIN_STAY_MIN_SNAPSHOTS = 2
+MAX_STAY_MIN_SNAPSHOTS = 500
+MIN_STAY_DISTANCE_METERS = 5
+MAX_STAY_DISTANCE_METERS = 2000
 
 
 class ZeitachseRuntimeData:
@@ -114,6 +121,36 @@ async def _get_person_colors(runtime: ZeitachseRuntimeData, user_id: str) -> dic
     }
 
 
+def _clamp(value: int, minimum: int, maximum: int) -> int:
+    """Clamp value to bounds."""
+    return max(minimum, min(maximum, value))
+
+
+def _coerce_stay_settings(raw: Any) -> dict[str, int]:
+    """Normalize stay detection settings."""
+    if not isinstance(raw, dict):
+        return {
+            "min_snapshots": DEFAULT_STAY_MIN_SNAPSHOTS,
+            "distance_meters": DEFAULT_STAY_DISTANCE_METERS,
+        }
+    min_snapshots = raw.get("min_snapshots")
+    distance_meters = raw.get("distance_meters")
+    if not isinstance(min_snapshots, int):
+        min_snapshots = DEFAULT_STAY_MIN_SNAPSHOTS
+    if not isinstance(distance_meters, int):
+        distance_meters = DEFAULT_STAY_DISTANCE_METERS
+    return {
+        "min_snapshots": _clamp(min_snapshots, MIN_STAY_MIN_SNAPSHOTS, MAX_STAY_MIN_SNAPSHOTS),
+        "distance_meters": _clamp(distance_meters, MIN_STAY_DISTANCE_METERS, MAX_STAY_DISTANCE_METERS),
+    }
+
+
+async def _get_stay_settings(runtime: ZeitachseRuntimeData, user_id: str) -> dict[str, int]:
+    """Return stay detection settings for one user."""
+    prefs = await runtime.preferences.async_get(user_id)
+    return _coerce_stay_settings(prefs.get("stay_settings"))
+
+
 @websocket_api.websocket_command({vol.Required("type"): WS_LIST_PEOPLE})
 @websocket_api.async_response
 async def ws_list_people(
@@ -125,6 +162,7 @@ async def ws_list_people(
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     active = await _get_active_persons(hass, runtime, connection.user.id)
     custom_colors = await _get_person_colors(runtime, connection.user.id)
+    stay_settings = await _get_stay_settings(runtime, connection.user.id)
     people = [
         _person_payload(
             hass,
@@ -134,7 +172,7 @@ async def ws_list_people(
         )
         for index, entity_id in enumerate(runtime.tracked_persons)
     ]
-    connection.send_result(msg["id"], {"people": people})
+    connection.send_result(msg["id"], {"people": people, "stay_settings": stay_settings})
 
 
 @websocket_api.websocket_command(
@@ -180,6 +218,35 @@ async def ws_set_person_colors(
     }
     await runtime.preferences.async_set(connection.user.id, {"person_colors": colors})
     connection.send_result(msg["id"], {"person_colors": colors})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_SET_STAY_SETTINGS,
+        vol.Required("min_snapshots"): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_STAY_MIN_SNAPSHOTS, max=MAX_STAY_MIN_SNAPSHOTS),
+        ),
+        vol.Required("distance_meters"): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_STAY_DISTANCE_METERS, max=MAX_STAY_DISTANCE_METERS),
+        ),
+    }
+)
+@websocket_api.async_response
+async def ws_set_stay_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set stay detection settings for the current user."""
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    settings = {
+        "min_snapshots": msg["min_snapshots"],
+        "distance_meters": msg["distance_meters"],
+    }
+    await runtime.preferences.async_set(connection.user.id, {"stay_settings": settings})
+    connection.send_result(msg["id"], {"stay_settings": settings})
 
 
 @websocket_api.websocket_command(
@@ -276,5 +343,6 @@ async def async_register_websocket_api(
     websocket_api.async_register_command(hass, ws_list_people)
     websocket_api.async_register_command(hass, ws_set_active_people)
     websocket_api.async_register_command(hass, ws_set_person_colors)
+    websocket_api.async_register_command(hass, ws_set_stay_settings)
     websocket_api.async_register_command(hass, ws_get_timeline)
     websocket_api.async_register_command(hass, ws_get_poi)
