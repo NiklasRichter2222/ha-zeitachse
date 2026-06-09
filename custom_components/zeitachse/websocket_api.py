@@ -20,6 +20,7 @@ from .const import (
     WS_GET_TIMELINE,
     WS_LIST_PEOPLE,
     WS_SET_ACTIVE_PEOPLE,
+    WS_SET_PERSON_COLORS,
 )
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 
@@ -84,6 +85,31 @@ def _person_payload(hass: HomeAssistant, person_entity_id: str, color: str, acti
     }
 
 
+def _is_valid_hex_color(value: Any) -> bool:
+    """Validate #RRGGBB color format."""
+    if not isinstance(value, str) or len(value) != 7 or not value.startswith("#"):
+        return False
+    try:
+        int(value[1:], 16)
+    except ValueError:
+        return False
+    return True
+
+
+async def _get_person_colors(runtime: ZeitachseRuntimeData, user_id: str) -> dict[str, str]:
+    """Return user color preferences filtered for tracked people."""
+    prefs = await runtime.preferences.async_get(user_id)
+    raw = prefs.get("person_colors", {})
+    if not isinstance(raw, dict):
+        return {}
+    tracked = set(runtime.tracked_persons)
+    return {
+        entity_id: color
+        for entity_id, color in raw.items()
+        if entity_id in tracked and _is_valid_hex_color(color)
+    }
+
+
 @websocket_api.websocket_command({vol.Required("type"): WS_LIST_PEOPLE})
 @websocket_api.async_response
 async def ws_list_people(
@@ -94,8 +120,14 @@ async def ws_list_people(
     """List tracked people and active state for current user."""
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     active = await _get_active_persons(hass, runtime, connection.user.id)
+    custom_colors = await _get_person_colors(runtime, connection.user.id)
     people = [
-        _person_payload(hass, entity_id, COLOR_PALETTE[index % len(COLOR_PALETTE)], entity_id in active)
+        _person_payload(
+            hass,
+            entity_id,
+            custom_colors.get(entity_id, COLOR_PALETTE[index % len(COLOR_PALETTE)]),
+            entity_id in active,
+        )
         for index, entity_id in enumerate(runtime.tracked_persons)
     ]
     connection.send_result(msg["id"], {"people": people})
@@ -119,6 +151,31 @@ async def ws_set_active_people(
     active = [entity_id for entity_id in msg["active_people"] if entity_id in tracked]
     await runtime.preferences.async_set(connection.user.id, {"active_people": active})
     connection.send_result(msg["id"], {"active_people": active})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_SET_PERSON_COLORS,
+        vol.Required("person_colors"): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_set_person_colors(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set custom person colors for the current user."""
+    runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    tracked = set(runtime.tracked_persons)
+    incoming = msg["person_colors"]
+    colors = {
+        entity_id: color
+        for entity_id, color in incoming.items()
+        if entity_id in tracked and _is_valid_hex_color(color)
+    }
+    await runtime.preferences.async_set(connection.user.id, {"person_colors": colors})
+    connection.send_result(msg["id"], {"person_colors": colors})
 
 
 @websocket_api.websocket_command(
@@ -195,4 +252,5 @@ async def async_register_websocket_api(
     hass.data[RUNTIME_DATA_KEY] = runtime
     websocket_api.async_register_command(hass, ws_list_people)
     websocket_api.async_register_command(hass, ws_set_active_people)
+    websocket_api.async_register_command(hass, ws_set_person_colors)
     websocket_api.async_register_command(hass, ws_get_timeline)

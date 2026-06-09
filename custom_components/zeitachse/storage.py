@@ -98,5 +98,7 @@ class UserPreferenceStorage:
     async def async_set(self, user_id: str, values: Mapping[str, Any]) -> None:
         """Persist one user's preferences."""
         prefs = await self.async_load()
-        prefs[user_id] = dict(values)
+        current = dict(prefs.get(user_id, {}))
+        current.update(dict(values))
+        prefs[user_id] = current
         await self._store.async_save(prefs)

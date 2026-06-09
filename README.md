@@ -12,7 +12,10 @@ HACS-kompatible Home-Assistant-Integration für eine einfache "Zeitachse" ähnli
 - Optionales Sidebar-Dashboard mit Karte und ein-/ausblendbarer Zeitachse pro Person
 - Lovelace-Kachel `zeitachse-card` für bestehende Dashboards
 - Standardmäßig ist im Dashboard nur die eigene Person aktiviert (wenn zuordenbar)
-- Farbige Darstellung je Person
+- Farbige Darstellung je Person inkl. manueller Farbauswahl pro Benutzer
+- Zeitraum-Filter in Dashboard/Kachel (`1h`, `1d`, `1w`, `1m`, `1j`)
+- Aufenthaltsliste mit Zeitstempeln und Koordinaten bei längerem Verweilen
+- Einfache Überblicksstatistik über aktive Personen und Snapshot-Anzahl
 
 ## Installation (HACS)
 
@@ -34,5 +37,7 @@ Bei der Einrichtung/Optionen:
 
 - Bei aktivierter Option **Dashboard in der Seitenleiste** erscheint links ein Eintrag **Zeitachse**.
 - Für ein bestehendes Dashboard kann eine manuelle Karte mit Typ `zeitachse-card` hinzugefügt werden.
+- In beiden Ansichten können pro Benutzer Farben direkt angepasst werden (wird pro angemeldetem Benutzer gespeichert).
+- Die Zeitraum-Auswahl steuert sowohl die Kartenanzeige als auch die Aufenthaltsliste im unteren Bereich.
 
 Ohne ausgewählte Personen wird niemand getrackt.

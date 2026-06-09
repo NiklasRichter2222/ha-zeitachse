@@ -1,10 +1,20 @@
 import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
-import { toPoint } from "./map-utils.js";
+import { haversineMeters, toPoint, toTimestamp } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
 const LEAFLET_WAIT_MAX_ATTEMPTS = 10;
 const LEAFLET_WAIT_DELAY_MS = 500;
+const RANGE_OPTIONS = ["1h", "1d", "1w", "1m", "1y"];
+const RANGE_LABELS = {
+  "1h": "1h",
+  "1d": "1d",
+  "1w": "1w",
+  "1m": "1m",
+  "1y": "1j",
+};
+const STAY_DISTANCE_METERS = 75;
+const STAY_MIN_DURATION_MS = 30 * 60 * 1000;
 
 class ZeitachseCard extends HTMLElement {
   constructor() {
@@ -16,6 +26,7 @@ class ZeitachseCard extends HTMLElement {
     this.layers = [];
     this._loaded = false;
     this._mapInitFailed = false;
+    this.selectedRange = "1d";
   }
 
   disconnectedCallback() {
@@ -42,26 +53,41 @@ class ZeitachseCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 6;
+    return 8;
   }
 
   _renderShell() {
     this.shadowRoot.innerHTML = `
       <style>
         ha-card { padding: 12px; }
-        .layout { display: flex; min-height: 420px; gap: 12px; }
-        .controls { width: 240px; overflow: auto; border: 1px solid var(--divider-color); border-radius: 8px; padding: 8px; }
-        #map { flex: 1; min-height: 420px; border-radius: 8px; }
+        .layout { display: flex; min-height: 560px; gap: 12px; }
+        .controls { width: 280px; overflow: auto; border: 1px solid var(--divider-color); border-radius: 8px; padding: 8px; }
+        .range-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+        .range-btn { border: 1px solid var(--divider-color); background: transparent; border-radius: 14px; padding: 4px 10px; cursor: pointer; }
+        .range-btn.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
         .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
+        .summary { color: var(--secondary-text-color); font-size: 0.9rem; margin-top: 8px; }
         .status { margin-bottom: 12px; color: var(--secondary-text-color); }
+        .map-and-list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+        #map { flex: 1; min-height: 320px; border-radius: 8px; }
+        .stay-list { flex: 1; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; overflow: auto; min-height: 220px; }
+        .stay-title { font-weight: 600; margin-bottom: 8px; }
+        .stay-item { border-top: 1px solid var(--divider-color); padding: 8px 0; }
+        .stay-item:first-of-type { border-top: none; padding-top: 0; }
+        .stay-empty { color: var(--secondary-text-color); }
+        .stay-meta { color: var(--secondary-text-color); font-size: 0.9rem; }
         ${LEAFLET_SHADOW_CSS}
       </style>
       <ha-card>
         <div class="status" id="status">Zeitachse lädt…</div>
         <div class="layout">
           <div class="controls" id="controls"></div>
-          <div id="map"></div>
+          <div class="map-and-list">
+            <div id="map"></div>
+            <div class="stay-list" id="stay-list"></div>
+          </div>
         </div>
       </ha-card>
     `;
@@ -112,6 +138,30 @@ class ZeitachseCard extends HTMLElement {
     }
   }
 
+  _rangeStart() {
+    const rangeStartDate = new Date();
+    switch (this.selectedRange) {
+      case "1h":
+        rangeStartDate.setHours(rangeStartDate.getHours() - 1);
+        break;
+      case "1d":
+        rangeStartDate.setDate(rangeStartDate.getDate() - 1);
+        break;
+      case "1w":
+        rangeStartDate.setDate(rangeStartDate.getDate() - 7);
+        break;
+      case "1m":
+        rangeStartDate.setMonth(rangeStartDate.getMonth() - 1);
+        break;
+      case "1y":
+        rangeStartDate.setFullYear(rangeStartDate.getFullYear() - 1);
+        break;
+      default:
+        break;
+    }
+    return rangeStartDate.toISOString();
+  }
+
   async _load() {
     if (!this._hass) return;
     const leafletReady = await this._waitForLeaflet();
@@ -129,6 +179,7 @@ class ZeitachseCard extends HTMLElement {
       await this._loadTimelines();
       this._renderControls();
       this._renderMap();
+      this._renderStayList();
       this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine Personen gefunden");
     } catch (error) {
       console.error("[zeitachse-card] Failed to load people/timeline data", error);
@@ -138,11 +189,13 @@ class ZeitachseCard extends HTMLElement {
 
   async _loadTimelines() {
     const active = this.people.filter((person) => person.active);
+    const start = this._rangeStart();
     await Promise.all(
       active.map(async (person) => {
         const timeline = await this._hass.callWS({
           type: "zeitachse/get_timeline",
           entity_id: person.entity_id,
+          start,
         });
         this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
         console.debug(
@@ -152,9 +205,54 @@ class ZeitachseCard extends HTMLElement {
     );
   }
 
+  async _setRange(range) {
+    this.selectedRange = range;
+    await this._loadTimelines();
+    this._renderControls();
+    this._renderMap();
+    this._renderStayList();
+  }
+
+  async _setPersonColor(person, color) {
+    person.color = color;
+    const personColors = Object.fromEntries(this.people.map((entry) => [entry.entity_id, entry.color]));
+    await this._hass.callWS({
+      type: "zeitachse/set_person_colors",
+      person_colors: personColors,
+    });
+  }
+
   _renderControls() {
     const controls = this.shadowRoot.getElementById("controls");
     controls.innerHTML = "";
+
+    const rangeRow = document.createElement("div");
+    rangeRow.className = "range-row";
+    for (const range of RANGE_OPTIONS) {
+      const button = document.createElement("button");
+      button.className = `range-btn ${this.selectedRange === range ? "active" : ""}`;
+      button.type = "button";
+      button.textContent = RANGE_LABELS[range] || range;
+      button.addEventListener("click", async () => {
+        if (this.selectedRange === range) return;
+        try {
+          await this._setRange(range);
+        } catch (error) {
+          console.error("[zeitachse-card] Failed to update range", error);
+          this._showStatus(`Network error while updating range: ${error?.message || error}`);
+        }
+      });
+      rangeRow.appendChild(button);
+    }
+    controls.appendChild(rangeRow);
+
+    const pointCount = this.people
+      .filter((it) => it.active)
+      .reduce((sum, person) => sum + (this.timelineByPerson.get(person.entity_id)?.length || 0), 0);
+    const summary = document.createElement("div");
+    summary.className = "summary";
+    summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
+    controls.appendChild(summary);
 
     for (const person of this.people) {
       const row = document.createElement("label");
@@ -163,8 +261,9 @@ class ZeitachseCard extends HTMLElement {
         <input type="checkbox" ${person.active ? "checked" : ""}>
         <span class="dot" style="background:${person.color}"></span>
         <span>${person.name}</span>
+        <input class="color-picker" type="color" value="${person.color}" aria-label="Farbe für ${person.name}">
       `;
-      row.querySelector("input").addEventListener("change", async (event) => {
+      row.querySelector("input[type='checkbox']").addEventListener("change", async (event) => {
         const isActive = event.target.checked;
         person.active = isActive;
         try {
@@ -176,6 +275,7 @@ class ZeitachseCard extends HTMLElement {
             const timeline = await this._hass.callWS({
               type: "zeitachse/get_timeline",
               entity_id: person.entity_id,
+              start: this._rangeStart(),
             });
             this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
             console.debug(
@@ -188,7 +288,24 @@ class ZeitachseCard extends HTMLElement {
           console.error("[zeitachse-card] Failed to update active people", error);
           this._showStatus(`Network error while updating active people: ${error?.message || error}`);
         }
+        this._renderControls();
         this._renderMap();
+        this._renderStayList();
+      });
+      row.querySelector("input[type='color']").addEventListener("change", async (event) => {
+        const previousColor = person.color;
+        const newColor = event.target.value;
+        try {
+          await this._setPersonColor(person, newColor);
+          this._renderControls();
+          this._renderMap();
+          this._renderStayList();
+        } catch (error) {
+          person.color = previousColor;
+          event.target.value = previousColor;
+          console.error("[zeitachse-card] Failed to update person color", error);
+          this._showStatus(`Network error while updating color: ${error?.message || error}`);
+        }
       });
       controls.appendChild(row);
     }
@@ -212,9 +329,7 @@ class ZeitachseCard extends HTMLElement {
     let latest = null;
     for (const person of this.people.filter((it) => it.active)) {
       const timeline = this.timelineByPerson.get(person.entity_id) || [];
-      const points = timeline
-        .map((entry) => toPoint(entry))
-        .filter((entry) => entry !== null);
+      const points = timeline.map((entry) => toPoint(entry)).filter((entry) => entry !== null);
 
       if (points.length === 0) continue;
 
@@ -224,7 +339,7 @@ class ZeitachseCard extends HTMLElement {
       const lastPoint = points[points.length - 1];
       latest = latest || lastPoint;
       const marker = window.L.circleMarker(lastPoint, { color: person.color, radius: 7 }).addTo(this.map);
-      marker.bindPopup(`${person.name} (${points.length} points)`);
+      marker.bindPopup(`${person.name} (${points.length} Punkte)`);
       this.layers.push(marker);
     }
 
@@ -234,6 +349,88 @@ class ZeitachseCard extends HTMLElement {
       this.map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
     }
     this.map.invalidateSize(true);
+  }
+
+  _collectStays() {
+    const stays = [];
+    for (const person of this.people.filter((it) => it.active)) {
+      const timeline = [...(this.timelineByPerson.get(person.entity_id) || [])].sort((first, second) => {
+        const firstTs = toTimestamp(first);
+        const secondTs = toTimestamp(second);
+        return (firstTs?.getTime() || 0) - (secondTs?.getTime() || 0);
+      });
+      if (timeline.length < 2) continue;
+
+      let current = null;
+      for (const entry of timeline) {
+        const point = toPoint(entry);
+        const timestamp = toTimestamp(entry);
+        if (!point || !timestamp) continue;
+
+        if (!current) {
+          current = { person, point, start: timestamp, end: timestamp, samples: 1 };
+          continue;
+        }
+
+        if (haversineMeters(current.point, point) <= STAY_DISTANCE_METERS) {
+          current.end = timestamp;
+          current.samples += 1;
+          continue;
+        }
+
+        const durationMs = current.end.getTime() - current.start.getTime();
+        if (durationMs >= STAY_MIN_DURATION_MS) {
+          stays.push({ ...current, durationMs });
+        }
+        current = { person, point, start: timestamp, end: timestamp, samples: 1 };
+      }
+
+      if (current) {
+        const durationMs = current.end.getTime() - current.start.getTime();
+        if (durationMs >= STAY_MIN_DURATION_MS) {
+          stays.push({ ...current, durationMs });
+        }
+      }
+    }
+
+    return stays.sort((a, b) => b.start.getTime() - a.start.getTime());
+  }
+
+  _formatDuration(durationMs) {
+    const totalMinutes = Math.round(durationMs / 60000);
+    if (totalMinutes < 60) return `${totalMinutes} min`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes ? `${hours}h ${minutes}min` : `${hours}h`;
+  }
+
+  _renderStayList() {
+    const container = this.shadowRoot.getElementById("stay-list");
+    if (!container) return;
+
+    const stays = this._collectStays();
+    if (!stays.length) {
+      container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
+      return;
+    }
+
+    const formatter = new Intl.DateTimeFormat("de-DE", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+    const content = stays
+      .map((stay) => {
+        const [lat, lon] = stay.point;
+        return `
+          <div class="stay-item">
+            <div><span class="dot" style="background:${stay.person.color}; display:inline-block; margin-right:8px;"></span><strong>${stay.person.name}</strong></div>
+            <div class="stay-meta">${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${this._formatDuration(stay.durationMs)}</div>
+            <div class="stay-meta">Koordinaten: ${lat.toFixed(5)}, ${lon.toFixed(5)} · ${stay.samples} Snapshots</div>
+          </div>
+        `;
+      })
+      .join("");
+    container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div>${content}`;
   }
 }
 
