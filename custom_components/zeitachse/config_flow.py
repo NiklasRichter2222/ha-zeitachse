@@ -13,14 +13,48 @@ from homeassistant.const import CONF_NAME
 from homeassistant.helpers import selector
 
 from .const import (
+    COLOR_PALETTE,
     CONF_ENABLE_DASHBOARD,
     CONF_ENCRYPTION_KEY,
     CONF_INTERVAL_MINUTES,
+    CONF_PERSON_COLORS,
+    CONF_STAY_DISTANCE_METERS,
+    CONF_STAY_MIN_SNAPSHOTS,
     CONF_TRACKED_PERSONS,
     DEFAULT_ENABLE_DASHBOARD,
     DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_STAY_DISTANCE_METERS,
+    DEFAULT_STAY_MIN_SNAPSHOTS,
     DOMAIN,
+    MAX_STAY_DISTANCE_METERS,
+    MAX_STAY_MIN_SNAPSHOTS,
+    MIN_STAY_DISTANCE_METERS,
+    MIN_STAY_MIN_SNAPSHOTS,
 )
+
+
+def _is_valid_hex_color(value: Any) -> bool:
+    """Validate #RRGGBB color format."""
+    if not isinstance(value, str) or len(value) != 7 or not value.startswith("#"):
+        return False
+    try:
+        int(value[1:], 16)
+    except ValueError:
+        return False
+    return True
+
+
+def _normalize_person_colors(tracked_persons: list[str], raw: Any) -> dict[str, str]:
+    """Normalize configured person colors for tracked people."""
+    source = raw if isinstance(raw, Mapping) else {}
+    return {
+        entity_id: (
+            source.get(entity_id)
+            if _is_valid_hex_color(source.get(entity_id))
+            else COLOR_PALETTE[index % len(COLOR_PALETTE)]
+        )
+        for index, entity_id in enumerate(tracked_persons)
+    }
 
 
 def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
@@ -28,6 +62,9 @@ def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
     tracked_persons = options.get(CONF_TRACKED_PERSONS, [])
     interval_minutes = options.get(CONF_INTERVAL_MINUTES, DEFAULT_INTERVAL_MINUTES)
     enable_dashboard = options.get(CONF_ENABLE_DASHBOARD, DEFAULT_ENABLE_DASHBOARD)
+    person_colors = _normalize_person_colors(tracked_persons, options.get(CONF_PERSON_COLORS))
+    stay_min_snapshots = options.get(CONF_STAY_MIN_SNAPSHOTS, DEFAULT_STAY_MIN_SNAPSHOTS)
+    stay_distance_meters = options.get(CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS)
 
     return vol.Schema(
         {
@@ -52,6 +89,32 @@ def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
                 CONF_ENABLE_DASHBOARD,
                 default=enable_dashboard,
             ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_PERSON_COLORS,
+                default=person_colors,
+            ): selector.ObjectSelector(),
+            vol.Optional(
+                CONF_STAY_MIN_SNAPSHOTS,
+                default=stay_min_snapshots,
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MIN_STAY_MIN_SNAPSHOTS,
+                    max=MAX_STAY_MIN_SNAPSHOTS,
+                    mode=selector.NumberSelectorMode.BOX,
+                    step=1,
+                )
+            ),
+            vol.Optional(
+                CONF_STAY_DISTANCE_METERS,
+                default=stay_distance_meters,
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MIN_STAY_DISTANCE_METERS,
+                    max=MAX_STAY_DISTANCE_METERS,
+                    mode=selector.NumberSelectorMode.BOX,
+                    step=1,
+                )
+            ),
         }
     )
 
@@ -67,11 +130,18 @@ class ZeitachseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="single_instance_allowed")
 
         if user_input is not None:
+            tracked_persons = user_input.get(CONF_TRACKED_PERSONS, [])
             data = {
                 CONF_NAME: user_input[CONF_NAME],
-                CONF_TRACKED_PERSONS: user_input.get(CONF_TRACKED_PERSONS, []),
+                CONF_TRACKED_PERSONS: tracked_persons,
                 CONF_INTERVAL_MINUTES: int(user_input[CONF_INTERVAL_MINUTES]),
                 CONF_ENABLE_DASHBOARD: bool(user_input[CONF_ENABLE_DASHBOARD]),
+                CONF_PERSON_COLORS: _normalize_person_colors(
+                    tracked_persons,
+                    user_input.get(CONF_PERSON_COLORS),
+                ),
+                CONF_STAY_MIN_SNAPSHOTS: int(user_input[CONF_STAY_MIN_SNAPSHOTS]),
+                CONF_STAY_DISTANCE_METERS: int(user_input[CONF_STAY_DISTANCE_METERS]),
                 CONF_ENCRYPTION_KEY: Fernet.generate_key().decode(),
             }
             return self.async_create_entry(title=user_input[CONF_NAME], data=data)
@@ -96,12 +166,19 @@ class ZeitachseOptionsFlow(config_entries.OptionsFlow):
         merged = {**self._config_entry.data, **self._config_entry.options}
 
         if user_input is not None:
+            tracked_persons = user_input.get(CONF_TRACKED_PERSONS, [])
             return self.async_create_entry(
                 title="",
                 data={
-                    CONF_TRACKED_PERSONS: user_input.get(CONF_TRACKED_PERSONS, []),
+                    CONF_TRACKED_PERSONS: tracked_persons,
                     CONF_INTERVAL_MINUTES: int(user_input[CONF_INTERVAL_MINUTES]),
                     CONF_ENABLE_DASHBOARD: bool(user_input[CONF_ENABLE_DASHBOARD]),
+                    CONF_PERSON_COLORS: _normalize_person_colors(
+                        tracked_persons,
+                        user_input.get(CONF_PERSON_COLORS),
+                    ),
+                    CONF_STAY_MIN_SNAPSHOTS: int(user_input[CONF_STAY_MIN_SNAPSHOTS]),
+                    CONF_STAY_DISTANCE_METERS: int(user_input[CONF_STAY_DISTANCE_METERS]),
                 },
             )
 

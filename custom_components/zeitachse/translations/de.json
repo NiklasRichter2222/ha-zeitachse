@@ -11,7 +11,10 @@
           "name": "Name",
           "tracked_persons": "Zu trackende Personen",
           "interval_minutes": "Intervall in Minuten",
-          "enable_dashboard": "Dashboard in der Seitenleiste aktivieren"
+          "enable_dashboard": "Dashboard in der Seitenleiste aktivieren",
+          "person_colors": "Personenfarben (JSON: entity_id -> #RRGGBB)",
+          "stay_min_snapshots": "Aufenthalts-Erkennung: Mindestanzahl Snapshots",
+          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)"
         }
       }
     }
@@ -24,7 +27,10 @@
           "name": "Name",
           "tracked_persons": "Zu trackende Personen",
           "interval_minutes": "Intervall in Minuten",
-          "enable_dashboard": "Dashboard in der Seitenleiste aktivieren"
+          "enable_dashboard": "Dashboard in der Seitenleiste aktivieren",
+          "person_colors": "Personenfarben (JSON: entity_id -> #RRGGBB)",
+          "stay_min_snapshots": "Aufenthalts-Erkennung: Mindestanzahl Snapshots",
+          "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)"
         }
       }
     }

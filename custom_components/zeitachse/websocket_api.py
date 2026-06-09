@@ -15,7 +15,16 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import (
     COLOR_PALETTE,
+    CONF_PERSON_COLORS,
+    CONF_STAY_DISTANCE_METERS,
+    CONF_STAY_MIN_SNAPSHOTS,
     CONF_TRACKED_PERSONS,
+    DEFAULT_STAY_DISTANCE_METERS,
+    DEFAULT_STAY_MIN_SNAPSHOTS,
+    MAX_STAY_DISTANCE_METERS,
+    MAX_STAY_MIN_SNAPSHOTS,
+    MIN_STAY_DISTANCE_METERS,
+    MIN_STAY_MIN_SNAPSHOTS,
     RUNTIME_DATA_KEY,
     WS_GET_POI,
     WS_GET_TIMELINE,
@@ -28,12 +37,6 @@ from .poi_lookup import PoiLookupService
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 
 _LOGGER = logging.getLogger(__name__)
-DEFAULT_STAY_MIN_SNAPSHOTS = 6
-DEFAULT_STAY_DISTANCE_METERS = 75
-MIN_STAY_MIN_SNAPSHOTS = 2
-MAX_STAY_MIN_SNAPSHOTS = 500
-MIN_STAY_DISTANCE_METERS = 5
-MAX_STAY_DISTANCE_METERS = 2000
 
 
 class ZeitachseRuntimeData:
@@ -108,16 +111,20 @@ def _is_valid_hex_color(value: Any) -> bool:
 
 
 async def _get_person_colors(runtime: ZeitachseRuntimeData, user_id: str) -> dict[str, str]:
-    """Return user color preferences filtered for tracked people."""
-    prefs = await runtime.preferences.async_get(user_id)
-    raw = prefs.get("person_colors", {})
-    if not isinstance(raw, dict):
-        return {}
-    tracked = set(runtime.tracked_persons)
+    """Return configured person colors for tracked people."""
+    del user_id
+    raw = runtime.config_entry.options.get(
+        CONF_PERSON_COLORS,
+        runtime.config_entry.data.get(CONF_PERSON_COLORS, {}),
+    )
+    color_map = raw if isinstance(raw, dict) else {}
     return {
-        entity_id: color
-        for entity_id, color in raw.items()
-        if entity_id in tracked and _is_valid_hex_color(color)
+        entity_id: (
+            color_map.get(entity_id)
+            if _is_valid_hex_color(color_map.get(entity_id))
+            else COLOR_PALETTE[index % len(COLOR_PALETTE)]
+        )
+        for index, entity_id in enumerate(runtime.tracked_persons)
     }
 
 
@@ -146,9 +153,20 @@ def _coerce_stay_settings(raw: Any) -> dict[str, int]:
 
 
 async def _get_stay_settings(runtime: ZeitachseRuntimeData, user_id: str) -> dict[str, int]:
-    """Return stay detection settings for one user."""
-    prefs = await runtime.preferences.async_get(user_id)
-    return _coerce_stay_settings(prefs.get("stay_settings"))
+    """Return configured stay detection settings."""
+    del user_id
+    return _coerce_stay_settings(
+        {
+            "min_snapshots": runtime.config_entry.options.get(
+                CONF_STAY_MIN_SNAPSHOTS,
+                runtime.config_entry.data.get(CONF_STAY_MIN_SNAPSHOTS, DEFAULT_STAY_MIN_SNAPSHOTS),
+            ),
+            "distance_meters": runtime.config_entry.options.get(
+                CONF_STAY_DISTANCE_METERS,
+                runtime.config_entry.data.get(CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS),
+            ),
+        }
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): WS_LIST_PEOPLE})

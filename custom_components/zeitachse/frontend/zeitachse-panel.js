@@ -230,15 +230,6 @@ class ZeitachsePanel extends HTMLElement {
     await this._refreshStaysAndPoi();
   }
 
-  async _setPersonColor(person, color) {
-    person.color = color;
-    const personColors = Object.fromEntries(this.people.map((entry) => [entry.entity_id, entry.color]));
-    await this._hass.callWS({
-      type: "zeitachse/set_person_colors",
-      person_colors: personColors,
-    });
-  }
-
   _normalizeStaySettings(settings) {
     const minSnapshots = Number(settings?.min_snapshots);
     const distanceMeters = Number(settings?.distance_meters);
@@ -252,16 +243,6 @@ class ZeitachsePanel extends HTMLElement {
       min_snapshots: normalizedMinSnapshots,
       distance_meters: normalizedDistanceMeters,
     };
-  }
-
-  async _setStaySettings(settings) {
-    const normalized = this._normalizeStaySettings(settings);
-    const result = await this._hass.callWS({
-      type: "zeitachse/set_stay_settings",
-      min_snapshots: normalized.min_snapshots,
-      distance_meters: normalized.distance_meters,
-    });
-    this.staySettings = this._normalizeStaySettings(result?.stay_settings);
   }
 
   _renderControls() {
@@ -296,56 +277,6 @@ class ZeitachsePanel extends HTMLElement {
     summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
     controls.appendChild(summary);
 
-    const settingsSection = document.createElement("div");
-    settingsSection.className = "stay-settings";
-    settingsSection.innerHTML = `
-      <div class="stay-settings-title">Aufenthalts-Erkennung</div>
-      <label class="stay-setting">
-        <span>Min. Snapshots</span>
-        <input class="stay-min-snapshots" type="number" min="${MIN_STAY_MIN_SNAPSHOTS}" max="${MAX_STAY_MIN_SNAPSHOTS}" step="1" value="${this.staySettings.min_snapshots}">
-      </label>
-      <label class="stay-setting">
-        <span>Abweichung (m)</span>
-        <input class="stay-distance-meters" type="number" min="${MIN_STAY_DISTANCE_METERS}" max="${MAX_STAY_DISTANCE_METERS}" step="1" value="${this.staySettings.distance_meters}">
-      </label>
-    `;
-    const minSnapshotsInput = settingsSection.querySelector(".stay-min-snapshots");
-    const distanceInput = settingsSection.querySelector(".stay-distance-meters");
-    if (!minSnapshotsInput || !distanceInput) {
-      controls.appendChild(settingsSection);
-      return;
-    }
-    const applyStaySettings = async () => {
-      const previous = { ...this.staySettings };
-      const next = this._normalizeStaySettings({
-        min_snapshots: Number(minSnapshotsInput.value),
-        distance_meters: Number(distanceInput.value),
-      });
-      if (
-        next.min_snapshots === previous.min_snapshots &&
-        next.distance_meters === previous.distance_meters
-      ) {
-        minSnapshotsInput.value = String(previous.min_snapshots);
-        distanceInput.value = String(previous.distance_meters);
-        return;
-      }
-      this.staySettings = next;
-      try {
-        await this._setStaySettings(next);
-        await this._refreshStaysAndPoi();
-        this._renderControls();
-      } catch (error) {
-        this.staySettings = previous;
-        minSnapshotsInput.value = String(previous.min_snapshots);
-        distanceInput.value = String(previous.distance_meters);
-        console.error("[zeitachse-panel] Failed to update stay settings", error);
-        this._showStatus(`Network error while updating stay settings: ${error?.message || error}`);
-      }
-    };
-    minSnapshotsInput.addEventListener("change", applyStaySettings);
-    distanceInput.addEventListener("change", applyStaySettings);
-    controls.appendChild(settingsSection);
-
     for (const person of this.people) {
       const row = document.createElement("label");
       row.className = "person";
@@ -353,7 +284,6 @@ class ZeitachsePanel extends HTMLElement {
         <input type="checkbox" ${person.active ? "checked" : ""}>
         <span class="dot" style="background:${person.color}"></span>
         <span>${person.name}</span>
-        <input class="color-picker" type="color" value="${person.color}" aria-label="Farbe für ${person.name}">
       `;
       row.querySelector("input[type='checkbox']").addEventListener("change", async (event) => {
         const isActive = event.target.checked;
@@ -382,21 +312,6 @@ class ZeitachsePanel extends HTMLElement {
         }
         this._renderControls();
         await this._refreshStaysAndPoi();
-      });
-      row.querySelector("input[type='color']").addEventListener("change", async (event) => {
-        const previousColor = person.color;
-        const newColor = event.target.value;
-        try {
-          await this._setPersonColor(person, newColor);
-          this._renderControls();
-          this._renderMap();
-          this._renderStayList();
-        } catch (error) {
-          person.color = previousColor;
-          event.target.value = previousColor;
-          console.error("[zeitachse-panel] Failed to update person color", error);
-          this._showStatus(`Network error while updating color: ${error?.message || error}`);
-        }
       });
       controls.appendChild(row);
     }

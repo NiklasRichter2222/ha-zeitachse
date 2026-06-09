@@ -38,9 +38,9 @@ Bei der Einrichtung/Optionen:
 
 - Bei aktivierter Option **Dashboard in der Seitenleiste** erscheint links ein Eintrag **Zeitachse**.
 - Für ein bestehendes Dashboard kann eine manuelle Karte mit Typ `zeitachse-card` hinzugefügt werden.
-- In beiden Ansichten können pro Benutzer Farben direkt angepasst werden (wird pro angemeldetem Benutzer gespeichert).
+- Farben je Person werden in den Integrations-Optionen festgelegt.
 - Die Zeitraum-Auswahl steuert sowohl die Kartenanzeige als auch die Aufenthaltsliste im unteren Bereich.
-- In beiden Ansichten können außerdem die Aufenthaltsregeln pro Benutzer angepasst werden:
+- Die Aufenthaltsregeln werden ebenfalls in den Integrations-Optionen gesetzt:
   - Mindestanzahl an Snapshots, ab der ein Aufenthalt als „verweilend“ zählt
   - Erlaubte Positions-Abweichung in Metern zwischen Snapshots, die noch als gleicher Ort gelten
 
