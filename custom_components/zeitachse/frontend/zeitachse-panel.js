@@ -342,7 +342,11 @@ class ZeitachsePanel extends HTMLElement {
   _collectStays() {
     const stays = [];
     for (const person of this.people.filter((it) => it.active)) {
-      const timeline = this.timelineByPerson.get(person.entity_id) || [];
+      const timeline = [...(this.timelineByPerson.get(person.entity_id) || [])].sort((first, second) => {
+        const firstTs = toTimestamp(first);
+        const secondTs = toTimestamp(second);
+        return (firstTs?.getTime() || 0) - (secondTs?.getTime() || 0);
+      });
       if (timeline.length < 2) continue;
 
       let current = null;

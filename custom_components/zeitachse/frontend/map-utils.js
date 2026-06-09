@@ -17,6 +17,7 @@ export const toTimestamp = (entry) => {
   return parsed;
 };
 
+// Returns Infinity for invalid input so callers can treat invalid points as "not near".
 export const haversineMeters = (firstPoint, secondPoint) => {
   if (!firstPoint || !secondPoint) {
     return Number.POSITIVE_INFINITY;
