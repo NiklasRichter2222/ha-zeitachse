@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import inspect
 import logging
 from typing import Any
 
@@ -87,6 +88,12 @@ async def _get_active_persons(
 
     self_person = _infer_self_person(hass, user_id, runtime.tracked_persons)
     return {self_person} if self_person else set()
+
+
+async def _maybe_await(value: Any) -> None:
+    """Await a value when it is awaitable."""
+    if inspect.isawaitable(value):
+        await value
 
 
 def _person_payload(hass: HomeAssistant, person_entity_id: str, color: str, active: bool) -> dict[str, Any]:
@@ -234,7 +241,9 @@ async def ws_set_person_colors(
     }
     updated_options = dict(runtime.config_entry.options)
     updated_options[CONF_PERSON_COLORS] = colors
-    hass.config_entries.async_update_entry(runtime.config_entry, options=updated_options)
+    await _maybe_await(
+        hass.config_entries.async_update_entry(runtime.config_entry, options=updated_options)
+    )
     connection.send_result(msg["id"], {"person_colors": colors})
 
 

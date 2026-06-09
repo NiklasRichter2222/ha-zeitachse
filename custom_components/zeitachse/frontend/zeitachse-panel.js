@@ -349,19 +349,25 @@ class ZeitachsePanel extends HTMLElement {
       row.querySelector(".color-picker").addEventListener("change", async (event) => {
         const previousColor = person.color;
         const nextColor = event.target.value;
+        const dot = row.querySelector(".dot");
         person.color = nextColor;
         try {
           await this._hass.callWS({
             type: "zeitachse/set_person_colors",
             person_colors: Object.fromEntries(this.people.map((entry) => [entry.entity_id, entry.color])),
           });
+          if (dot) {
+            dot.style.background = person.color;
+          }
         } catch (error) {
           person.color = previousColor;
           event.target.value = previousColor;
+          if (dot) {
+            dot.style.background = previousColor;
+          }
           console.error("[zeitachse-panel] Failed to update person colors", error);
           this._showStatus(`Network error while updating person colors: ${error?.message || error}`);
         }
-        this._renderControls();
         this._renderMap();
         this._renderStayList();
       });
