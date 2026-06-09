@@ -16,6 +16,21 @@ const RANGE_LABELS = {
 const STAY_DISTANCE_METERS = 75;
 const STAY_MIN_DURATION_MS = 30 * 60 * 1000;
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function pointKey(point) {
+  if (!Array.isArray(point) || point.length !== 2) return "";
+  const [lat, lon] = point;
+  return `${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
+}
+
 class ZeitachseCard extends HTMLElement {
   constructor() {
     super();
@@ -24,8 +39,11 @@ class ZeitachseCard extends HTMLElement {
     this.timelineByPerson = new Map();
     this.map = null;
     this.layers = [];
+    this.stays = [];
+    this.poiByPoint = new Map();
     this._loaded = false;
     this._mapInitFailed = false;
+    this._poiLookupVersion = 0;
     this.selectedRange = "1d";
   }
 
@@ -178,8 +196,7 @@ class ZeitachseCard extends HTMLElement {
       console.debug(`[zeitachse-card] Loaded ${this.people.length} people`);
       await this._loadTimelines();
       this._renderControls();
-      this._renderMap();
-      this._renderStayList();
+      await this._refreshStaysAndPoi();
       this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine Personen gefunden");
     } catch (error) {
       console.error("[zeitachse-card] Failed to load people/timeline data", error);
@@ -209,8 +226,7 @@ class ZeitachseCard extends HTMLElement {
     this.selectedRange = range;
     await this._loadTimelines();
     this._renderControls();
-    this._renderMap();
-    this._renderStayList();
+    await this._refreshStaysAndPoi();
   }
 
   async _setPersonColor(person, color) {
@@ -289,8 +305,7 @@ class ZeitachseCard extends HTMLElement {
           this._showStatus(`Network error while updating active people: ${error?.message || error}`);
         }
         this._renderControls();
-        this._renderMap();
-        this._renderStayList();
+        await this._refreshStaysAndPoi();
       });
       row.querySelector("input[type='color']").addEventListener("change", async (event) => {
         const previousColor = person.color;
@@ -341,6 +356,27 @@ class ZeitachseCard extends HTMLElement {
       const marker = window.L.circleMarker(lastPoint, { color: person.color, radius: 7 }).addTo(this.map);
       marker.bindPopup(`${person.name} (${points.length} Punkte)`);
       this.layers.push(marker);
+    }
+
+    for (const stay of this.stays) {
+      const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
+      const stayMarker = window.L.marker(stay.point).addTo(this.map);
+      const poiLabel = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
+      const detailsLink = poi?.url
+        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+        : "";
+      stayMarker.bindPopup(
+        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${detailsLink}`
+      );
+      if (poi?.name) {
+        stayMarker.bindTooltip(escapeHtml(poi.name), {
+          permanent: true,
+          direction: "top",
+          offset: [0, -10],
+          className: "zeitachse-poi-label",
+        });
+      }
+      this.layers.push(stayMarker);
     }
 
     if (latest) {
@@ -404,11 +440,47 @@ class ZeitachseCard extends HTMLElement {
     return minutes ? `${hours}h ${minutes}min` : `${hours}h`;
   }
 
+  async _refreshStaysAndPoi() {
+    const stays = this._collectStays();
+    this.stays = stays;
+    await this._loadPoiForStays(stays);
+    this._renderMap();
+    this._renderStayList();
+  }
+
+  async _loadPoiForStays(stays) {
+    const version = ++this._poiLookupVersion;
+    const missing = new Map();
+    for (const stay of stays) {
+      const key = pointKey(stay.point);
+      if (!key || this.poiByPoint.has(key) || missing.has(key)) continue;
+      missing.set(key, stay.point);
+    }
+    await Promise.all(
+      [...missing.entries()].map(async ([key, point]) => {
+        try {
+          const [latitude, longitude] = point;
+          const result = await this._hass.callWS({
+            type: "zeitachse/get_poi",
+            latitude,
+            longitude,
+          });
+          if (version !== this._poiLookupVersion) return;
+          this.poiByPoint.set(key, result?.poi || null);
+        } catch (error) {
+          if (version !== this._poiLookupVersion) return;
+          this.poiByPoint.set(key, null);
+          console.debug("[zeitachse-card] POI lookup failed", error);
+        }
+      })
+    );
+  }
+
   _renderStayList() {
     const container = this.shadowRoot.getElementById("stay-list");
     if (!container) return;
 
-    const stays = this._collectStays();
+    const stays = this.stays;
     if (!stays.length) {
       container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
       return;
@@ -420,12 +492,16 @@ class ZeitachseCard extends HTMLElement {
     });
     const content = stays
       .map((stay) => {
-        const [lat, lon] = stay.point;
+        const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
+        const poiName = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
+        const poiLink = poi?.url
+          ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+          : "";
         return `
           <div class="stay-item">
-            <div><span class="dot" style="background:${stay.person.color}; display:inline-block; margin-right:8px;"></span><strong>${stay.person.name}</strong></div>
+            <div><span class="dot" style="background:${stay.person.color}; display:inline-block; margin-right:8px;"></span><strong>${escapeHtml(stay.person.name)}</strong></div>
             <div class="stay-meta">${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${this._formatDuration(stay.durationMs)}</div>
-            <div class="stay-meta">Koordinaten: ${lat.toFixed(5)}, ${lon.toFixed(5)} · ${stay.samples} Snapshots</div>
+            <div class="stay-meta">POI: ${poiName}${poiLink} · ${stay.samples} Snapshots</div>
           </div>
         `;
       })

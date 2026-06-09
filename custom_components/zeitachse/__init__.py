@@ -27,6 +27,7 @@ from .const import (
     RUNTIME_DATA_KEY,
     SNAPSHOT_STORAGE_FILE,
 )
+from .poi_lookup import PoiLookupService
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
 from .websocket_api import ZeitachseRuntimeData, async_register_websocket_api
 
@@ -209,10 +210,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data[CONF_ENCRYPTION_KEY],
     )
     preferences = UserPreferenceStorage(hass)
+    poi_lookup = PoiLookupService(hass)
     tracker = TrackingManager(hass, entry, storage)
     await tracker.async_start()
 
-    runtime = ZeitachseRuntimeData(entry, storage, preferences)
+    runtime = ZeitachseRuntimeData(entry, storage, preferences, poi_lookup)
     if not hass.data[DOMAIN].get("websocket_registered"):
         await async_register_websocket_api(hass, runtime)
         hass.data[DOMAIN]["websocket_registered"] = True

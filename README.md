@@ -14,7 +14,8 @@ HACS-kompatible Home-Assistant-Integration für eine einfache "Zeitachse" ähnli
 - Standardmäßig ist im Dashboard nur die eigene Person aktiviert (wenn zuordenbar)
 - Farbige Darstellung je Person inkl. manueller Farbauswahl pro Benutzer
 - Zeitraum-Filter in Dashboard/Kachel (`1h`, `1d`, `1w`, `1m`, `1j`)
-- Aufenthaltsliste mit Zeitstempeln und Koordinaten bei längerem Verweilen
+- Aufenthaltsliste mit Zeitstempeln und POI-Namen (OpenStreetMap/Nominatim) bei längerem Verweilen
+- Klickbarer POI-Link zu OpenStreetMap und zusätzliche Aufenthalts-Pins auf der Karte
 - Einfache Überblicksstatistik über aktive Personen und Snapshot-Anzahl
 
 ## Installation (HACS)
