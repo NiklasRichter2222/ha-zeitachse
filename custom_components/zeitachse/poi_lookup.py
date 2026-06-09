@@ -134,11 +134,12 @@ class PoiLookupService:
             distance = self._haversine_meters(latitude, longitude, float(zone_lat), float(zone_lon))
             if distance > float(zone_radius):
                 continue
-            zone_name = (
+            zone_name_raw = (
                 state.attributes.get(ATTR_FRIENDLY_NAME)
                 or state.name
                 or state.entity_id.removeprefix("zone.")
             )
+            zone_name = str(zone_name_raw).strip() or "Unknown Zone"
             zone = {
                 "name": zone_name,
                 "display_name": zone_name,
