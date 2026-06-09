@@ -362,7 +362,8 @@ class ZeitachsePanel extends HTMLElement {
           this._showStatus(`Network error while updating person colors: ${error?.message || error}`);
         }
         this._renderControls();
-        await this._refreshStaysAndPoi();
+        this._renderMap();
+        this._renderStayList();
       });
       controls.appendChild(row);
     }
