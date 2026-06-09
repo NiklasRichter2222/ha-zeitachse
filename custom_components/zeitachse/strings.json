@@ -11,7 +11,10 @@
           "name": "Name",
           "tracked_persons": "People to track",
           "interval_minutes": "Interval in minutes",
-          "enable_dashboard": "Enable dashboard in sidebar"
+          "enable_dashboard": "Enable dashboard in sidebar",
+          "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
+          "stay_min_snapshots": "Stay detection: minimum snapshots",
+          "stay_distance_meters": "Stay detection: distance tolerance (meters)"
         }
       }
     }
@@ -24,7 +27,10 @@
           "name": "Name",
           "tracked_persons": "People to track",
           "interval_minutes": "Interval in minutes",
-          "enable_dashboard": "Enable dashboard in sidebar"
+          "enable_dashboard": "Enable dashboard in sidebar",
+          "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
+          "stay_min_snapshots": "Stay detection: minimum snapshots",
+          "stay_distance_meters": "Stay detection: distance tolerance (meters)"
         }
       }
     }

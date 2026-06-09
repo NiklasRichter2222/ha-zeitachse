@@ -79,11 +79,26 @@ class ZeitachsePanel extends HTMLElement {
       <style>
         .layout { display: flex; height: 100%; gap: 12px; padding: 12px; box-sizing: border-box; }
         .status { margin: 12px; color: var(--secondary-text-color); }
-        .controls { width: 320px; overflow: auto; border: 1px solid var(--divider-color); border-radius: 8px; padding: 8px; }
+        .controls {
+          position: absolute;
+          top: 10px;
+          left: 10px;
+          z-index: 500;
+          width: min(320px, calc(100% - 20px));
+          max-height: calc(100% - 20px);
+          overflow: auto;
+          border: 1px solid var(--divider-color);
+          border-radius: 10px;
+          padding: 10px;
+          box-sizing: border-box;
+          backdrop-filter: blur(2px);
+          background: color-mix(in srgb, var(--card-background-color, #1f1f1f) 50%, transparent);
+        }
         .range-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
         .range-btn { border: 1px solid var(--divider-color); background: transparent; border-radius: 14px; padding: 4px 10px; cursor: pointer; }
         .range-btn.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
         .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+        .person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
         .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
         .summary { color: var(--secondary-text-color); font-size: 0.9rem; margin-top: 8px; }
@@ -92,20 +107,37 @@ class ZeitachsePanel extends HTMLElement {
         .stay-setting { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; }
         .stay-setting input { width: 90px; }
         .map-and-list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-        #map { flex: 1; min-height: 320px; border-radius: 8px; }
+        .map-wrapper { position: relative; flex: 1; min-height: 320px; }
+        #map { height: 100%; min-height: 320px; border-radius: 8px; }
         .stay-list { flex: 1; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; overflow: auto; min-height: 220px; }
         .stay-title { font-weight: 600; margin-bottom: 8px; }
         .stay-item { border-top: 1px solid var(--divider-color); padding: 8px 0; }
         .stay-item:first-of-type { border-top: none; padding-top: 0; }
         .stay-empty { color: var(--secondary-text-color); }
         .stay-meta { color: var(--secondary-text-color); font-size: 0.9rem; }
+        @media (max-width: 900px) {
+          .layout { gap: 8px; padding: 8px; }
+          .map-and-list { gap: 8px; }
+          .map-wrapper { min-height: 280px; }
+          #map { min-height: 280px; }
+          .controls {
+            top: 8px;
+            left: 8px;
+            width: min(300px, calc(100% - 16px));
+            max-height: 60%;
+            padding: 8px;
+          }
+          .stay-list { min-height: 180px; }
+        }
         ${LEAFLET_SHADOW_CSS}
       </style>
       <div class="status" id="status">Zeitachse lädt…</div>
       <div class="layout">
-        <div class="controls" id="controls"></div>
         <div class="map-and-list">
-          <div id="map"></div>
+          <div class="map-wrapper">
+            <div id="map"></div>
+            <div class="controls" id="controls"></div>
+          </div>
           <div class="stay-list" id="stay-list"></div>
         </div>
       </div>
@@ -230,15 +262,6 @@ class ZeitachsePanel extends HTMLElement {
     await this._refreshStaysAndPoi();
   }
 
-  async _setPersonColor(person, color) {
-    person.color = color;
-    const personColors = Object.fromEntries(this.people.map((entry) => [entry.entity_id, entry.color]));
-    await this._hass.callWS({
-      type: "zeitachse/set_person_colors",
-      person_colors: personColors,
-    });
-  }
-
   _normalizeStaySettings(settings) {
     const minSnapshots = Number(settings?.min_snapshots);
     const distanceMeters = Number(settings?.distance_meters);
@@ -252,16 +275,6 @@ class ZeitachsePanel extends HTMLElement {
       min_snapshots: normalizedMinSnapshots,
       distance_meters: normalizedDistanceMeters,
     };
-  }
-
-  async _setStaySettings(settings) {
-    const normalized = this._normalizeStaySettings(settings);
-    const result = await this._hass.callWS({
-      type: "zeitachse/set_stay_settings",
-      min_snapshots: normalized.min_snapshots,
-      distance_meters: normalized.distance_meters,
-    });
-    this.staySettings = this._normalizeStaySettings(result?.stay_settings);
   }
 
   _renderControls() {
@@ -296,66 +309,16 @@ class ZeitachsePanel extends HTMLElement {
     summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
     controls.appendChild(summary);
 
-    const settingsSection = document.createElement("div");
-    settingsSection.className = "stay-settings";
-    settingsSection.innerHTML = `
-      <div class="stay-settings-title">Aufenthalts-Erkennung</div>
-      <label class="stay-setting">
-        <span>Min. Snapshots</span>
-        <input class="stay-min-snapshots" type="number" min="${MIN_STAY_MIN_SNAPSHOTS}" max="${MAX_STAY_MIN_SNAPSHOTS}" step="1" value="${this.staySettings.min_snapshots}">
-      </label>
-      <label class="stay-setting">
-        <span>Abweichung (m)</span>
-        <input class="stay-distance-meters" type="number" min="${MIN_STAY_DISTANCE_METERS}" max="${MAX_STAY_DISTANCE_METERS}" step="1" value="${this.staySettings.distance_meters}">
-      </label>
-    `;
-    const minSnapshotsInput = settingsSection.querySelector(".stay-min-snapshots");
-    const distanceInput = settingsSection.querySelector(".stay-distance-meters");
-    if (!minSnapshotsInput || !distanceInput) {
-      controls.appendChild(settingsSection);
-      return;
-    }
-    const applyStaySettings = async () => {
-      const previous = { ...this.staySettings };
-      const next = this._normalizeStaySettings({
-        min_snapshots: Number(minSnapshotsInput.value),
-        distance_meters: Number(distanceInput.value),
-      });
-      if (
-        next.min_snapshots === previous.min_snapshots &&
-        next.distance_meters === previous.distance_meters
-      ) {
-        minSnapshotsInput.value = String(previous.min_snapshots);
-        distanceInput.value = String(previous.distance_meters);
-        return;
-      }
-      this.staySettings = next;
-      try {
-        await this._setStaySettings(next);
-        await this._refreshStaysAndPoi();
-        this._renderControls();
-      } catch (error) {
-        this.staySettings = previous;
-        minSnapshotsInput.value = String(previous.min_snapshots);
-        distanceInput.value = String(previous.distance_meters);
-        console.error("[zeitachse-panel] Failed to update stay settings", error);
-        this._showStatus(`Network error while updating stay settings: ${error?.message || error}`);
-      }
-    };
-    minSnapshotsInput.addEventListener("change", applyStaySettings);
-    distanceInput.addEventListener("change", applyStaySettings);
-    controls.appendChild(settingsSection);
-
     for (const person of this.people) {
-      const row = document.createElement("label");
+      const row = document.createElement("div");
       row.className = "person";
       row.innerHTML = `
-        <input type="checkbox" ${person.active ? "checked" : ""}>
+        <input class="person-active" type="checkbox" ${person.active ? "checked" : ""}>
         <span class="dot" style="background:${person.color}"></span>
-        <span>${person.name}</span>
-        <input class="color-picker" type="color" value="${person.color}" aria-label="Farbe für ${person.name}">
+        <span class="person-name">${escapeHtml(person.name)}</span>
+        <input class="color-picker" type="color" value="${person.color}" aria-label="Farbe für ${escapeHtml(person.name)}">
       `;
-      row.querySelector("input[type='checkbox']").addEventListener("change", async (event) => {
+      row.querySelector(".person-active").addEventListener("change", async (event) => {
         const isActive = event.target.checked;
         person.active = isActive;
         try {
@@ -383,20 +346,30 @@ class ZeitachsePanel extends HTMLElement {
         this._renderControls();
         await this._refreshStaysAndPoi();
       });
-      row.querySelector("input[type='color']").addEventListener("change", async (event) => {
+      row.querySelector(".color-picker").addEventListener("change", async (event) => {
         const previousColor = person.color;
-        const newColor = event.target.value;
+        const nextColor = event.target.value;
+        const dot = row.querySelector(".dot");
+        person.color = nextColor;
         try {
-          await this._setPersonColor(person, newColor);
-          this._renderControls();
-          this._renderMap();
-          this._renderStayList();
+          await this._hass.callWS({
+            type: "zeitachse/set_person_colors",
+            person_colors: Object.fromEntries(this.people.map((entry) => [entry.entity_id, entry.color])),
+          });
+          if (dot) {
+            dot.style.background = person.color;
+          }
         } catch (error) {
           person.color = previousColor;
           event.target.value = previousColor;
-          console.error("[zeitachse-panel] Failed to update person color", error);
-          this._showStatus(`Network error while updating color: ${error?.message || error}`);
+          if (dot) {
+            dot.style.background = previousColor;
+          }
+          console.error("[zeitachse-panel] Failed to update person colors", error);
+          this._showStatus(`Network error while updating person colors: ${error?.message || error}`);
         }
+        this._renderMap();
+        this._renderStayList();
       });
       controls.appendChild(row);
     }
