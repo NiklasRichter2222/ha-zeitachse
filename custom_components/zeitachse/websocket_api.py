@@ -223,7 +223,7 @@ async def ws_set_person_colors(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Set custom person colors for the current user."""
+    """Set configured person colors for tracked people."""
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     tracked = set(runtime.tracked_persons)
     incoming = msg["person_colors"]
@@ -232,7 +232,9 @@ async def ws_set_person_colors(
         for entity_id, color in incoming.items()
         if entity_id in tracked and _is_valid_hex_color(color)
     }
-    await runtime.preferences.async_set(connection.user.id, {"person_colors": colors})
+    updated_options = dict(runtime.config_entry.options)
+    updated_options[CONF_PERSON_COLORS] = colors
+    hass.config_entries.async_update_entry(runtime.config_entry, options=updated_options)
     connection.send_result(msg["id"], {"person_colors": colors})
 
 
