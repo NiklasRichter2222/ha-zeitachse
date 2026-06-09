@@ -360,7 +360,13 @@ class ZeitachseCard extends HTMLElement {
 
     for (const stay of this.stays) {
       const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
-      const stayMarker = window.L.marker(stay.point).addTo(this.map);
+      const stayMarker = window.L.circleMarker(stay.point, {
+        radius: 8,
+        color: "#f57c00",
+        fillColor: "#ff9800",
+        fillOpacity: 0.9,
+        weight: 2,
+      }).addTo(this.map);
       const poiLabel = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
       const detailsLink = poi?.url
         ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
@@ -372,7 +378,7 @@ class ZeitachseCard extends HTMLElement {
         stayMarker.bindTooltip(escapeHtml(poi.name), {
           permanent: true,
           direction: "top",
-          offset: [0, -10],
+          offset: [0, -8],
           className: "zeitachse-poi-label",
         });
       }
