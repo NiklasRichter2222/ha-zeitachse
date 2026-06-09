@@ -640,7 +640,12 @@ class ZeitachseCardEditor extends HTMLElement {
     `;
 
     this.querySelector("#person")?.addEventListener("change", (event) => {
-      const next = { ...this._config, person: event.target.value || undefined };
+      const next = { ...this._config };
+      if (event.target.value) {
+        next.person = event.target.value;
+      } else {
+        delete next.person;
+      }
       this._fireConfigChanged(next);
     });
     this.querySelector("#range")?.addEventListener("change", (event) => {
