@@ -128,27 +128,27 @@ class ZeitachsePanel extends HTMLElement {
   }
 
   _rangeStart() {
-    const end = new Date();
+    const rangeStartDate = new Date();
     switch (this.selectedRange) {
       case "1h":
-        end.setHours(end.getHours() - 1);
+        rangeStartDate.setHours(rangeStartDate.getHours() - 1);
         break;
       case "1d":
-        end.setDate(end.getDate() - 1);
+        rangeStartDate.setDate(rangeStartDate.getDate() - 1);
         break;
       case "1w":
-        end.setDate(end.getDate() - 7);
+        rangeStartDate.setDate(rangeStartDate.getDate() - 7);
         break;
       case "1m":
-        end.setMonth(end.getMonth() - 1);
+        rangeStartDate.setMonth(rangeStartDate.getMonth() - 1);
         break;
       case "1y":
-        end.setFullYear(end.getFullYear() - 1);
+        rangeStartDate.setFullYear(rangeStartDate.getFullYear() - 1);
         break;
       default:
         break;
     }
-    return end.toISOString();
+    return rangeStartDate.toISOString();
   }
 
   async _load() {
@@ -385,7 +385,7 @@ class ZeitachsePanel extends HTMLElement {
   }
 
   _formatDuration(durationMs) {
-    const totalMinutes = Math.max(1, Math.round(durationMs / 60000));
+    const totalMinutes = Math.round(durationMs / 60000);
     if (totalMinutes < 60) return `${totalMinutes} min`;
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
