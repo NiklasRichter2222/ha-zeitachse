@@ -37,9 +37,12 @@ Bei der Einrichtung/Optionen:
 ## Dashboard & Kachel
 
 - Bei aktivierter Option **Dashboard in der Seitenleiste** erscheint links ein Eintrag **Zeitachse**.
-- Für ein bestehendes Dashboard kann eine manuelle Karte mit Typ `zeitachse-card` hinzugefügt werden.
-- Farben je Person werden in den Integrations-Optionen festgelegt.
-- Die Zeitraum-Auswahl steuert sowohl die Kartenanzeige als auch die Aufenthaltsliste im unteren Bereich.
+- Für ein bestehendes Dashboard können folgende Karten genutzt werden:
+  - `zeitachse-card` (Karte + Timeline kombiniert)
+  - `zeitachse-map-card` (nur Karte)
+  - `zeitachse-timeline-card` (nur Timeline)
+- In allen Karten lassen sich Personen, Farben und Zeitraum direkt in den Karten-Controls anpassen.
+- Die Zeitraum-Auswahl steuert Kartenanzeige und/oder Aufenthaltsliste je nach Kartentyp.
 - Die Aufenthaltsregeln werden ebenfalls in den Integrations-Optionen gesetzt:
   - Mindestanzahl an Snapshots, ab der ein Aufenthalt als „verweilend“ zählt
   - Erlaubte Positions-Abweichung in Metern zwischen Snapshots, die noch als gleicher Ort gelten
