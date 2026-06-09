@@ -60,7 +60,7 @@ function normalizeCenter(value) {
 function normalizeZoom(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return DEFAULT_MAP_ZOOM;
-  return Math.max(1, Math.round(number));
+  return Math.max(1, Math.min(22, Math.round(number)));
 }
 
 class ZeitachseBaseCard extends HTMLElement {
@@ -486,7 +486,7 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
   setConfig(config) {
     super.setConfig(config);
     this.selectedPersonEntityId = this.config.person || null;
-    this.timelineHeightRows = normalizeTimelineHeightRows(this.config.height_rows ?? this.config.height);
+    this.timelineHeightRows = normalizeTimelineHeightRows(this.config.height_rows);
   }
 
   getCardSize() {
@@ -602,16 +602,17 @@ class ZeitachseCardEditor extends HTMLElement {
 
   _personOptions() {
     const states = this._hass?.states || {};
+    const locale = this._hass?.locale?.language || navigator.language || "de-DE";
     return Object.values(states)
       .filter((state) => state.entity_id?.startsWith("person."))
       .map((state) => ({ entity_id: state.entity_id, name: state.attributes?.friendly_name || state.entity_id }))
-      .sort((a, b) => a.name.localeCompare(b.name, "de"));
+      .sort((a, b) => a.name.localeCompare(b.name, locale));
   }
 
   _renderTimelineEditor() {
     const personOptions = this._personOptions();
     const selectedRange = normalizeRange(this._config.range);
-    const selectedRows = normalizeTimelineHeightRows(this._config.height_rows ?? this._config.height);
+    const selectedRows = normalizeTimelineHeightRows(this._config.height_rows);
     this.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:8px;">
         <label>Person
@@ -648,7 +649,6 @@ class ZeitachseCardEditor extends HTMLElement {
     });
     this.querySelector("#height_rows")?.addEventListener("change", (event) => {
       const next = { ...this._config, height_rows: normalizeTimelineHeightRows(event.target.value) };
-      delete next.height;
       this._fireConfigChanged(next);
     });
   }
