@@ -66,7 +66,7 @@ class PoiLookupService:
         return "snapshot" not in lowered and "scapshot" not in lowered
 
     @classmethod
-    def _extract_poi_name(data: dict[str, Any]) -> str | None:
+    def _extract_poi_name(cls, data: dict[str, Any]) -> str | None:
         """Extract a useful POI name from Nominatim response."""
         if isinstance(data.get("name"), str) and data["name"].strip():
             candidate = data["name"].strip()
