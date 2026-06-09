@@ -40,5 +40,8 @@ Bei der Einrichtung/Optionen:
 - Für ein bestehendes Dashboard kann eine manuelle Karte mit Typ `zeitachse-card` hinzugefügt werden.
 - In beiden Ansichten können pro Benutzer Farben direkt angepasst werden (wird pro angemeldetem Benutzer gespeichert).
 - Die Zeitraum-Auswahl steuert sowohl die Kartenanzeige als auch die Aufenthaltsliste im unteren Bereich.
+- In beiden Ansichten können außerdem die Aufenthaltsregeln pro Benutzer angepasst werden:
+  - Mindestanzahl an Snapshots, ab der ein Aufenthalt als „verweilend“ zählt
+  - Erlaubte Positions-Abweichung in Metern zwischen Snapshots, die noch als gleicher Ort gelten
 
 Ohne ausgewählte Personen wird niemand getrackt.
