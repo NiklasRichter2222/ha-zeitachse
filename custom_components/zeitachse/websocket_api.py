@@ -110,9 +110,8 @@ def _is_valid_hex_color(value: Any) -> bool:
     return True
 
 
-async def _get_person_colors(runtime: ZeitachseRuntimeData, user_id: str) -> dict[str, str]:
+async def _get_person_colors(runtime: ZeitachseRuntimeData, _user_id: str) -> dict[str, str]:
     """Return configured person colors for tracked people."""
-    del user_id
     raw = runtime.config_entry.options.get(
         CONF_PERSON_COLORS,
         runtime.config_entry.data.get(CONF_PERSON_COLORS, {}),
@@ -152,9 +151,8 @@ def _coerce_stay_settings(raw: Any) -> dict[str, int]:
     }
 
 
-async def _get_stay_settings(runtime: ZeitachseRuntimeData, user_id: str) -> dict[str, int]:
+async def _get_stay_settings(runtime: ZeitachseRuntimeData, _user_id: str) -> dict[str, int]:
     """Return configured stay detection settings."""
-    del user_id
     return _coerce_stay_settings(
         {
             "min_snapshots": runtime.config_entry.options.get(
