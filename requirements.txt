@@ -1,4 +1,1 @@
 homeassistant
-voluptuous
-cryptography
-aiohttp
