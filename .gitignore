@@ -5,3 +5,11 @@ hass
 backups
 blueprints
 .storage
+home-assistant*
+scenes.yaml
+scripts.yaml
+secrets.yaml
+.ha_run.lock
+.HA_VERSION
+automations.yaml
+configuration.yaml
