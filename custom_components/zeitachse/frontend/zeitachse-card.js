@@ -568,6 +568,16 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       stayMarker.bindPopup(
         `<strong>${poiLabel}</strong><br>${visitCountText}<br>Person: ${escapeHtml(cluster.person.name)}${detailsLink}`
       );
+
+      if (poi?.name) {
+        stayMarker.bindTooltip(escapeHtml(poi.name), {
+          permanent: true,
+          direction: "top",
+          offset: [0, -6],
+          className: "zeitachse-poi-label",
+        });
+      }
+
       this.layers.push(stayMarker);
       this.stayMarkers.push(stayMarker);
     }
@@ -584,7 +594,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       }
     }
     this._updateTooltipsVisibility();
-    this.map.invalidateSize(true);
+    requestAnimationFrame(() => this.map?.invalidateSize(false));
   }
 
   _updateTooltipsVisibility() {
@@ -592,12 +602,12 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
     const currentZoom = this.map.getZoom();
     const sortedClusters = [...this.stayClusters].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
     let maxVisibleTooltips = sortedClusters.length;
-    if (currentZoom < 7) {
-      maxVisibleTooltips = 15;
+    if (currentZoom < 8) {
+      maxVisibleTooltips = 4;
     } else if (currentZoom < 11) {
-      maxVisibleTooltips = 30;
+      maxVisibleTooltips = 8;
     } else if (currentZoom < 13) {
-      maxVisibleTooltips = 60;
+      maxVisibleTooltips = 16;
     }
 
     const visibleClusterIds = new Set(
@@ -605,16 +615,13 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
     );
 
     for (const marker of (this.stayMarkers || [])) {
-      const poi = this.poiByPoint.get(marker._pointKey);
       const isVisible = visibleClusterIds.has(marker._clusterId);
-      marker.unbindTooltip();
-      if (poi?.name && isVisible) {
-        marker.bindTooltip(escapeHtml(poi.name), {
-          permanent: true,
-          direction: "top",
-          offset: [0, -8],
-          className: "zeitachse-poi-label",
-        });
+      const tooltip = marker.getTooltip();
+      if (tooltip) {
+        const el = tooltip.getElement();
+        if (el) {
+          el.style.display = isVisible ? "block" : "none";
+        }
       }
     }
   }

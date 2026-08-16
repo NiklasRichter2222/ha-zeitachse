@@ -118,15 +118,48 @@ class UserPreferenceStorage:
             self._cache = await self._store.async_load() or {}
         return self._cache
 
-    async def async_get(self, user_id: str) -> dict[str, Any]:
-        """Get one user's preferences."""
+    async def async_get(self, user_id: str | None = None) -> dict[str, Any]:
+        """Get one user's preferences, with global fallback."""
         prefs = await self.async_load()
-        return dict(prefs.get(user_id, {}))
+        if user_id and user_id in prefs:
+            return dict(prefs[user_id])
+        if "global" in prefs:
+            return dict(prefs["global"])
+        return {}
 
-    async def async_set(self, user_id: str, values: Mapping[str, Any]) -> None:
+    async def async_set(
+        self, user_id: str | None, values: Mapping[str, Any]
+    ) -> None:
         """Persist one user's preferences."""
         prefs = await self.async_load()
-        current = dict(prefs.get(user_id, {}))
+        key = user_id or "global"
+        current = dict(prefs.get(key, {}))
         current.update(dict(values))
-        prefs[user_id] = current
+        prefs[key] = current
         await self._store.async_save(prefs)
+
+    async def async_set_active_people(
+        self, active_people: list[str], user_id: str | None = None
+    ) -> None:
+        """Helper to save active people."""
+        await self.async_set(user_id, {"active_people": active_people})
+
+    async def async_set_person_colors(
+        self, person_colors: dict[str, str], user_id: str | None = None
+    ) -> None:
+        """Helper to save custom person colors."""
+        await self.async_set(user_id, {"person_colors": person_colors})
+
+    async def async_set_stay_settings(
+        self, min_snapshots: int, distance_meters: int, user_id: str | None = None
+    ) -> None:
+        """Helper to save stay detection settings."""
+        await self.async_set(
+            user_id,
+            {
+                "stay_settings": {
+                    "min_snapshots": min_snapshots,
+                    "distance_meters": distance_meters,
+                }
+            },
+        )

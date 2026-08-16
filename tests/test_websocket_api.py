@@ -93,7 +93,7 @@ async def test_ws_list_people(mock_runtime):
     hass = MagicMock()
     hass.data = {RUNTIME_DATA_KEY: mock_runtime}
 
-    mock_runtime.preferences.async_load = AsyncMock(
+    mock_runtime.preferences.async_get = AsyncMock(
         return_value={"active_people": ["person.alice"]}
     )
 
@@ -137,7 +137,7 @@ async def test_ws_set_active_people(mock_runtime):
     await call_ws(ws_set_active_people, hass, connection, msg)
 
     mock_runtime.preferences.async_set_active_people.assert_awaited_once_with(
-        ["person.bob", "person.unknown"]
+        ["person.bob", "person.unknown"], "user_123"
     )
     connection.send_result.assert_called_once_with(2, {"status": "ok"})
 
@@ -150,6 +150,7 @@ async def test_ws_set_person_colors(mock_runtime):
     mock_runtime.preferences.async_set_person_colors = AsyncMock()
 
     connection = MagicMock()
+    connection.user.id = "user_123"
     msg = {
         "id": 3,
         "type": "zeitachse/set_person_colors",
@@ -158,7 +159,7 @@ async def test_ws_set_person_colors(mock_runtime):
     await call_ws(ws_set_person_colors, hass, connection, msg)
 
     mock_runtime.preferences.async_set_person_colors.assert_awaited_once_with(
-        {"person.alice": "#00ff00"}
+        {"person.alice": "#00ff00"}, "user_123"
     )
     connection.send_result.assert_called_once_with(3, {"status": "ok"})
 
@@ -182,7 +183,7 @@ async def test_ws_set_stay_settings(mock_runtime):
     await call_ws(ws_set_stay_settings, hass, connection, msg)
 
     mock_runtime.preferences.async_set_stay_settings.assert_awaited_once_with(
-        12, 150
+        12, 150, "user_123"
     )
     connection.send_result.assert_called_once_with(4, {"status": "ok"})
 

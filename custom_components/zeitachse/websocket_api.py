@@ -138,7 +138,8 @@ async def ws_list_people(
         CONF_TRACKED_PERSONS,
         entry.data.get(CONF_TRACKED_PERSONS, []),
     )
-    prefs = await _maybe_await(runtime.preferences.async_load())
+    user_id = connection.user.id if connection.user else None
+    prefs = await _maybe_await(runtime.preferences.async_get(user_id))
     if not isinstance(prefs, dict):
         prefs = {}
     active_people = prefs.get("active_people")
@@ -219,8 +220,11 @@ async def ws_set_active_people(
 ) -> None:
     """Set active person filters for UI."""
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    user_id = connection.user.id if connection.user else None
     active_people = msg["active_people"]
-    await _maybe_await(runtime.preferences.async_set_active_people(active_people))
+    await _maybe_await(
+        runtime.preferences.async_set_active_people(active_people, user_id)
+    )
     connection.send_result(msg["id"], {"status": "ok"})
 
 
@@ -238,8 +242,11 @@ async def ws_set_person_colors(
 ) -> None:
     """Set custom color palette for persons."""
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    user_id = connection.user.id if connection.user else None
     person_colors = msg["person_colors"]
-    await _maybe_await(runtime.preferences.async_set_person_colors(person_colors))
+    await _maybe_await(
+        runtime.preferences.async_set_person_colors(person_colors, user_id)
+    )
     connection.send_result(msg["id"], {"status": "ok"})
 
 
@@ -262,10 +269,13 @@ async def ws_set_stay_settings(
 ) -> None:
     """Set custom stay detection thresholds for UI."""
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
+    user_id = connection.user.id if connection.user else None
     min_snapshots = msg["min_snapshots"]
     distance_meters = msg["distance_meters"]
     await _maybe_await(
-        runtime.preferences.async_set_stay_settings(min_snapshots, distance_meters)
+        runtime.preferences.async_set_stay_settings(
+            min_snapshots, distance_meters, user_id
+        )
     )
     connection.send_result(msg["id"], {"status": "ok"})
 

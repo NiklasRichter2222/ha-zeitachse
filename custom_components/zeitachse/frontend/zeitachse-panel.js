@@ -699,6 +699,15 @@ class ZeitachsePanel extends HTMLElement {
       stayMarker.bindPopup(
         `<strong>${poiLabel}</strong><br>${visitCountText}<br>Person: ${escapeHtml(cluster.person.name)}${detailsLink}`
       );
+
+      if (poi?.name) {
+        stayMarker.bindTooltip(escapeHtml(poi.name), {
+          permanent: true,
+          direction: "top",
+          offset: [0, -6],
+          className: "zeitachse-poi-label",
+        });
+      }
       
       this.layers.push(stayMarker);
       this.stayMarkers.push(stayMarker);
@@ -725,12 +734,12 @@ class ZeitachsePanel extends HTMLElement {
     const sortedClusters = [...this.stayClusters].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
     
     let maxVisibleTooltips = sortedClusters.length;
-    if (currentZoom < 7) {
-      maxVisibleTooltips = 15;
+    if (currentZoom < 8) {
+      maxVisibleTooltips = 4;
     } else if (currentZoom < 11) {
-      maxVisibleTooltips = 30;
+      maxVisibleTooltips = 8;
     } else if (currentZoom < 13) {
-      maxVisibleTooltips = 60;
+      maxVisibleTooltips = 16;
     }
 
     const visibleClusterIds = new Set(
@@ -738,17 +747,13 @@ class ZeitachsePanel extends HTMLElement {
     );
 
     for (const marker of this.stayMarkers) {
-      const poi = this.poiByPoint.get(marker._pointKey);
       const isVisible = visibleClusterIds.has(marker._clusterId);
-      
-      marker.unbindTooltip();
-      if (poi?.name && isVisible) {
-        marker.bindTooltip(escapeHtml(poi.name), {
-          permanent: true,
-          direction: "top",
-          offset: [0, -8],
-          className: "zeitachse-poi-label",
-        });
+      const tooltip = marker.getTooltip();
+      if (tooltip) {
+        const el = tooltip.getElement();
+        if (el) {
+          el.style.display = isVisible ? "block" : "none";
+        }
       }
     }
   }
@@ -849,7 +854,22 @@ class ZeitachsePanel extends HTMLElement {
     }
   }
 
-  _updateStayMarker(key, _poi) {
+  _updateStayMarker(key, poi) {
+    if (!poi?.name) return;
+    for (const marker of this.stayMarkers) {
+      if (marker._pointKey === key) {
+        if (!marker.getTooltip()) {
+          marker.bindTooltip(escapeHtml(poi.name), {
+            permanent: true,
+            direction: "top",
+            offset: [0, -6],
+            className: "zeitachse-poi-label",
+          });
+        } else {
+          marker.setTooltipContent(escapeHtml(poi.name));
+        }
+      }
+    }
     this._updateTooltipsVisibility();
   }
 
