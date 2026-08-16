@@ -1,10 +1,8 @@
 import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
-import { ensureLeafletLoaded, haversineMeters, simplifyPoints, toPoint, toTimestamp } from "./map-utils.js";
+import { clusterStays, ensureLeafletLoaded, haversineMeters, pointKey, simplifyPoints, toPoint, toTimestamp } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
-const LEAFLET_WAIT_MAX_ATTEMPTS = 10;
-const LEAFLET_WAIT_DELAY_MS = 500;
 const RANGE_OPTIONS = ["1h", "1d", "1w", "1m", "1y"];
 const RANGE_LABELS = {
   "1h": "1h",
@@ -29,12 +27,6 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function pointKey(point) {
-  if (!Array.isArray(point) || point.length !== 2) return "";
-  const [lat, lon] = point;
-  return `${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
-}
-
 class ZeitachsePanel extends HTMLElement {
   constructor() {
     super();
@@ -44,9 +36,12 @@ class ZeitachsePanel extends HTMLElement {
     this.map = null;
     this.layers = [];
     this.stays = [];
+    this.stayClusters = [];
+    this.stayMarkers = [];
     this.poiByPoint = new Map();
     this._loaded = false;
     this._mapInitFailed = false;
+    this._isFullMap = false;
     this._poiLookupVersion = 0;
     this.selectedRange = "1d";
     this.staySettings = {
@@ -77,71 +72,212 @@ class ZeitachsePanel extends HTMLElement {
   _renderShell() {
     this.shadowRoot.innerHTML = `
       <style>
-        .layout { display: flex; height: 100%; gap: 12px; padding: 12px; box-sizing: border-box; }
-        .status { margin: 12px; color: var(--secondary-text-color); }
+        :host {
+          display: block;
+          height: 100vh;
+          width: 100%;
+          overflow: hidden;
+          box-sizing: border-box;
+        }
+        .panel-root {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          width: 100%;
+          overflow: hidden;
+          box-sizing: border-box;
+          padding: 8px;
+          gap: 8px;
+          background: var(--primary-background-color, #111111);
+        }
+        .top-bar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 0 4px;
+          flex-shrink: 0;
+          min-height: 32px;
+        }
+        .status {
+          color: var(--secondary-text-color, #999999);
+          font-size: 0.9rem;
+        }
+        .view-toggle-btn {
+          background: var(--card-background-color, #1e1e1e);
+          color: var(--primary-text-color, #ffffff);
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.15));
+          border-radius: 8px;
+          padding: 5px 12px;
+          font-size: 0.85rem;
+          font-weight: 500;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.2s ease;
+        }
+        .view-toggle-btn:hover {
+          background: color-mix(in srgb, var(--primary-color, #03a9f4) 15%, var(--card-background-color, #1e1e1e));
+          border-color: var(--primary-color, #03a9f4);
+        }
+        .main-split {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          overflow: hidden;
+        }
+        .map-wrapper {
+          position: relative;
+          flex: 6 1 0%;
+          min-height: 0;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+          box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+          transition: flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .map-wrapper.full-map {
+          flex: 1 1 100%;
+        }
+        #map {
+          width: 100%;
+          height: 100%;
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+        }
         .controls {
           position: absolute;
           top: 10px;
           left: 10px;
-          z-index: 500;
-          width: min(320px, calc(100% - 20px));
+          z-index: 1000;
+          width: min(300px, calc(100% - 20px));
           max-height: calc(100% - 20px);
-          overflow: auto;
-          border: 1px solid var(--divider-color);
-          border-radius: 10px;
+          overflow-y: auto;
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.2));
+          border-radius: 12px;
           padding: 10px;
           box-sizing: border-box;
-          backdrop-filter: blur(2px);
-          background: color-mix(in srgb, var(--card-background-color, #1f1f1f) 50%, transparent);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          background: color-mix(in srgb, var(--card-background-color, #1f1f1f) 80%, transparent);
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
         }
-        .range-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-        .range-btn { border: 1px solid var(--divider-color); background: transparent; border-radius: 14px; padding: 4px 10px; cursor: pointer; }
+        .range-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .range-btn { border: 1px solid var(--divider-color); background: transparent; color: inherit; border-radius: 14px; padding: 4px 10px; cursor: pointer; }
         .range-btn.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
         .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
         .person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
         .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
-        .summary { color: var(--secondary-text-color); font-size: 0.9rem; margin-top: 8px; }
-        .stay-settings { margin-top: 12px; border-top: 1px solid var(--divider-color); padding-top: 10px; }
-        .stay-settings-title { font-weight: 600; margin-bottom: 8px; }
-        .stay-setting { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; }
-        .stay-setting input { width: 90px; }
-        .map-and-list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-        .map-wrapper { position: relative; flex: 1; min-height: 320px; }
-        #map { height: 100%; min-height: 320px; border-radius: 8px; }
-        .stay-list { flex: 1; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; overflow: auto; min-height: 220px; }
-        .stay-title { font-weight: 600; margin-bottom: 8px; }
-        .stay-item { border-top: 1px solid var(--divider-color); padding: 8px 0; }
-        .stay-item:first-of-type { border-top: none; padding-top: 0; }
-        .stay-empty { color: var(--secondary-text-color); }
-        .stay-meta { color: var(--secondary-text-color); font-size: 0.9rem; }
-        @media (max-width: 900px) {
-          .layout { gap: 8px; padding: 8px; }
-          .map-and-list { gap: 8px; }
-          .map-wrapper { min-height: 280px; }
-          #map { min-height: 280px; }
-          .controls {
-            top: 8px;
-            left: 8px;
-            width: min(300px, calc(100% - 16px));
-            max-height: 60%;
-            padding: 8px;
-          }
-          .stay-list { min-height: 180px; }
+        .summary { color: var(--secondary-text-color); font-size: 0.85rem; margin-top: 6px; }
+        .stay-settings { margin-top: 10px; border-top: 1px solid var(--divider-color); padding-top: 8px; }
+        .stay-settings-title { font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
+        .stay-setting { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 4px 0; font-size: 0.85rem; }
+        .stay-setting input { width: 80px; }
+        
+        .stay-list-panel {
+          flex: 4 1 0%;
+          min-height: 0;
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+          border-radius: 12px;
+          padding: 12px;
+          overflow-y: auto;
+          box-sizing: border-box;
+          background: var(--card-background-color, #1e1e1e);
+          transition: flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .stay-list-panel.hidden {
+          display: none;
+        }
+        .stay-title { font-weight: 600; font-size: 1rem; margin-bottom: 10px; color: var(--primary-text-color, #ffffff); }
+        .stay-group {
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.08));
+          border-radius: 8px;
+          margin-bottom: 8px;
+          padding: 8px 10px;
+          background: rgba(255, 255, 255, 0.02);
+        }
+        .stay-group-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 8px;
+        }
+        .stay-group-title { font-weight: 600; font-size: 0.95rem; color: var(--primary-text-color, #ffffff); }
+        .stay-group-badge {
+          background: var(--primary-color, #03a9f4);
+          color: #ffffff;
+          border-radius: 12px;
+          padding: 2px 8px;
+          font-size: 0.75rem;
+          font-weight: 600;
+        }
+        .stay-sub-item {
+          margin-top: 6px;
+          padding-top: 6px;
+          border-top: 1px dashed var(--divider-color, rgba(255,255,255,0.08));
+          font-size: 0.85rem;
+          color: var(--secondary-text-color, #aaaaaa);
+        }
+        .stay-empty { color: var(--secondary-text-color); font-size: 0.9rem; }
+        
+        /* Tooltip styling within Shadow DOM */
+        .leaflet-tooltip.zeitachse-poi-label {
+          position: absolute !important;
+          background: rgba(24, 24, 27, 0.88) !important;
+          color: #ffffff !important;
+          border: 1px solid rgba(255, 255, 255, 0.25) !important;
+          border-radius: 6px !important;
+          padding: 3px 8px !important;
+          font-size: 11px !important;
+          font-weight: 500 !important;
+          white-space: nowrap !important;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45) !important;
+          pointer-events: none !important;
+          backdrop-filter: blur(6px) !important;
+          -webkit-backdrop-filter: blur(6px) !important;
+        }
+        .leaflet-tooltip-top:before {
+          border-top-color: rgba(24, 24, 27, 0.88) !important;
         }
         ${LEAFLET_SHADOW_CSS}
       </style>
-      <div class="status" id="status">Zeitachse lädt…</div>
-      <div class="layout">
-        <div class="map-and-list">
-          <div class="map-wrapper">
+      <div class="panel-root">
+        <div class="top-bar">
+          <div class="status" id="status">Zeitachse lädt…</div>
+          <button class="view-toggle-btn" id="toggle-view-btn" type="button">⛶ Vollbild Karte</button>
+        </div>
+        <div class="main-split">
+          <div class="map-wrapper" id="map-wrapper">
             <div id="map"></div>
             <div class="controls" id="controls"></div>
           </div>
-          <div class="stay-list" id="stay-list"></div>
+          <div class="stay-list-panel" id="stay-list"></div>
         </div>
       </div>
     `;
+
+    const toggleBtn = this.shadowRoot.getElementById("toggle-view-btn");
+    toggleBtn.addEventListener("click", () => {
+      this._isFullMap = !this._isFullMap;
+      const mapWrapper = this.shadowRoot.getElementById("map-wrapper");
+      const stayList = this.shadowRoot.getElementById("stay-list");
+      if (this._isFullMap) {
+        mapWrapper.classList.add("full-map");
+        stayList.classList.add("hidden");
+        toggleBtn.textContent = "◫ Geteilte Ansicht (60/40)";
+      } else {
+        mapWrapper.classList.remove("full-map");
+        stayList.classList.remove("hidden");
+        toggleBtn.textContent = "⛶ Vollbild Karte";
+      }
+      setTimeout(() => this.map?.invalidateSize(true), 300);
+    });
   }
 
   _showStatus(message) {
@@ -172,6 +308,11 @@ class ZeitachsePanel extends HTMLElement {
       window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "&copy; OpenStreetMap contributors",
       }).addTo(this.map);
+
+      this.map.on("zoomend", () => {
+        this._updateTooltipsVisibility();
+      });
+
       requestAnimationFrame(() => this.map?.invalidateSize(true));
       this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
       this._resizeObserver.observe(mapElement);
@@ -225,7 +366,7 @@ class ZeitachsePanel extends HTMLElement {
       console.debug(`[zeitachse-panel] Loaded ${this.people.length} people`);
       await this._loadTimelines();
       this._renderControls();
-      await this._refreshStaysAndPoi();
+      this._refreshStaysAndPoi();
       this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine Personen gefunden");
     } catch (error) {
       console.error("[zeitachse-panel] Failed to load people/timeline data", error);
@@ -255,7 +396,7 @@ class ZeitachsePanel extends HTMLElement {
     this.selectedRange = range;
     await this._loadTimelines();
     this._renderControls();
-    await this._refreshStaysAndPoi();
+    this._refreshStaysAndPoi();
   }
 
   _normalizeStaySettings(settings) {
@@ -329,9 +470,6 @@ class ZeitachsePanel extends HTMLElement {
               start: this._rangeStart(),
             });
             this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
-            console.debug(
-              `[zeitachse-panel] Loaded ${this.timelineByPerson.get(person.entity_id).length} snapshots for ${person.entity_id}`
-            );
           }
         } catch (error) {
           person.active = !isActive;
@@ -340,7 +478,7 @@ class ZeitachsePanel extends HTMLElement {
           this._showStatus(`Network error while updating active people: ${error?.message || error}`);
         }
         this._renderControls();
-        await this._refreshStaysAndPoi();
+        this._refreshStaysAndPoi();
       });
       row.querySelector(".color-picker").addEventListener("change", async (event) => {
         const previousColor = person.color;
@@ -385,13 +523,15 @@ class ZeitachsePanel extends HTMLElement {
       this.map.removeLayer(layer);
     }
     this.layers = [];
+    this.stayMarkers = [];
 
-    let latest = null;
+    let hasData = false;
     for (const person of this.people.filter((it) => it.active)) {
       const timeline = this.timelineByPerson.get(person.entity_id) || [];
       const points = timeline.map((entry) => toPoint(entry)).filter((entry) => entry !== null);
 
       if (points.length === 0) continue;
+      hasData = true;
 
       const simplified = simplifyPoints(points, 3);
       const polyline = window.L.polyline(simplified, {
@@ -402,21 +542,22 @@ class ZeitachsePanel extends HTMLElement {
       this.layers.push(polyline);
 
       const lastPoint = points[points.length - 1];
-      latest = latest || lastPoint;
       const marker = window.L.circleMarker(lastPoint, {
         color: person.color,
         radius: 7,
         renderer: window.L.canvas({ padding: 0.5 }),
       }).addTo(this.map);
-      marker.bindPopup(`${person.name} (${points.length} Punkte)`);
+      marker.bindPopup(`<strong>${escapeHtml(person.name)}</strong><br>${points.length} Punkte`);
       this.layers.push(marker);
     }
 
-    for (const stay of this.stays) {
-      const key = pointKey(stay.point);
+    for (const cluster of this.stayClusters) {
+      hasData = true;
+      const key = pointKey(cluster.point);
       const poi = this.poiByPoint.get(key) || null;
-      const stayMarker = window.L.circleMarker(stay.point, {
-        radius: 8,
+      const radius = Math.min(14, 7 + Math.log2(cluster.stays.length + 1) * 2);
+      const stayMarker = window.L.circleMarker(cluster.point, {
+        radius,
         color: "#f57c00",
         fillColor: "#ff9800",
         fillOpacity: 0.9,
@@ -424,30 +565,74 @@ class ZeitachsePanel extends HTMLElement {
         renderer: window.L.canvas({ padding: 0.5 }),
       }).addTo(this.map);
       stayMarker._pointKey = key;
+      stayMarker._clusterId = cluster.id;
+      
       const poiLabel = poi?.name ? escapeHtml(poi.name) : "Aufenthalt";
       const detailsLink = poi?.url
-        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos auf OSM</a>`
         : "";
+      const visitCountText = cluster.stays.length > 1
+        ? `${cluster.stays.length} Aufenthalte · Gesamtdauer ${this._formatDuration(cluster.totalDurationMs)}`
+        : `1 Aufenthalt · Dauer ${this._formatDuration(cluster.totalDurationMs)}`;
+
       stayMarker.bindPopup(
-        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${detailsLink}`
+        `<strong>${poiLabel}</strong><br>${visitCountText}<br>Person: ${escapeHtml(cluster.person.name)}${detailsLink}`
       );
-      if (poi?.name) {
-        stayMarker.bindTooltip(escapeHtml(poi.name), {
+      
+      this.layers.push(stayMarker);
+      this.stayMarkers.push(stayMarker);
+    }
+
+    if (hasData && this.layers.length > 0) {
+      const group = window.L.featureGroup(this.layers);
+      const bounds = group.getBounds();
+      if (bounds.isValid()) {
+        this.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+      }
+    } else {
+      this.map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
+    }
+
+    this._updateTooltipsVisibility();
+    this.map.invalidateSize(true);
+  }
+
+  _updateTooltipsVisibility() {
+    if (!this.map) return;
+    const currentZoom = this.map.getZoom();
+    
+    // Sort clusters by importance: totalDurationMs
+    const sortedClusters = [...this.stayClusters].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
+    
+    // Decluttering logic based on zoom level:
+    // zoom < 10 (Country scale): show top 3 places
+    // zoom 10-12 (Region/City scale): show top 8 places
+    // zoom >= 13 (Street scale): show all places
+    let maxVisibleTooltips = sortedClusters.length;
+    if (currentZoom < 10) {
+      maxVisibleTooltips = 3;
+    } else if (currentZoom < 13) {
+      maxVisibleTooltips = 8;
+    }
+
+    const visibleClusterIds = new Set(
+      sortedClusters.slice(0, maxVisibleTooltips).map((c) => c.id)
+    );
+
+    for (const marker of this.stayMarkers) {
+      const poi = this.poiByPoint.get(marker._pointKey);
+      const isVisible = visibleClusterIds.has(marker._clusterId);
+      
+      marker.unbindTooltip();
+      if (poi?.name && isVisible) {
+        marker.bindTooltip(escapeHtml(poi.name), {
           permanent: true,
           direction: "top",
           offset: [0, -8],
           className: "zeitachse-poi-label",
         });
       }
-      this.layers.push(stayMarker);
     }
-
-    if (latest) {
-      this.map.setView(latest, 12);
-    } else {
-      this.map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
-    }
-    this.map.invalidateSize(true);
   }
 
   _collectStays() {
@@ -506,20 +691,22 @@ class ZeitachsePanel extends HTMLElement {
   }
 
   _refreshStaysAndPoi() {
-    const stays = this._collectStays();
-    this.stays = stays;
+    const rawStays = this._collectStays();
+    this.stays = rawStays;
+    const distanceMeters = this.staySettings?.distance_meters ?? DEFAULT_STAY_DISTANCE_METERS;
+    this.stayClusters = clusterStays(rawStays, distanceMeters);
     this._renderMap();
     this._renderStayList();
-    this._loadPoiForStays(stays);
+    this._loadPoiForClusters(this.stayClusters);
   }
 
-  async _loadPoiForStays(stays) {
+  async _loadPoiForClusters(clusters) {
     const version = ++this._poiLookupVersion;
     const missing = new Map();
-    for (const stay of stays) {
-      const key = pointKey(stay.point);
+    for (const cluster of clusters) {
+      const key = pointKey(cluster.point);
       if (!key || this.poiByPoint.has(key) || missing.has(key)) continue;
-      missing.set(key, stay.point);
+      missing.set(key, cluster.point);
     }
     if (missing.size === 0) return;
 
@@ -544,27 +731,16 @@ class ZeitachsePanel extends HTMLElement {
     }
   }
 
-  _updateStayMarker(key, poi) {
-    if (!poi?.name || !this.map) return;
-    for (const layer of this.layers) {
-      if (layer._pointKey === key) {
-        layer.unbindTooltip();
-        layer.bindTooltip(escapeHtml(poi.name), {
-          permanent: true,
-          direction: "top",
-          offset: [0, -8],
-          className: "zeitachse-poi-label",
-        });
-      }
-    }
+  _updateStayMarker(key, _poi) {
+    this._updateTooltipsVisibility();
   }
 
   _renderStayList() {
     const container = this.shadowRoot.getElementById("stay-list");
     if (!container) return;
 
-    const stays = this.stays;
-    if (!stays.length) {
+    const clusters = this.stayClusters;
+    if (!clusters.length) {
       container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
       return;
     }
@@ -573,23 +749,40 @@ class ZeitachsePanel extends HTMLElement {
       dateStyle: "short",
       timeStyle: "short",
     });
-    const content = stays
-      .map((stay) => {
-        const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
-        const poiName = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
+
+    const content = clusters
+      .map((cluster) => {
+        const key = pointKey(cluster.point);
+        const poi = this.poiByPoint.get(key) || null;
+        const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
         const poiLink = poi?.url
-          ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+          ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
           : "";
+        const visitsHtml = cluster.stays
+          .map((stay) => `
+            <div class="stay-sub-item">
+              <div>${formatter.format(stay.start)} → ${formatter.format(stay.end)} · <strong>${this._formatDuration(stay.durationMs)}</strong> (${stay.samples} Snapshots)</div>
+            </div>
+          `)
+          .join("");
+
         return `
-          <div class="stay-item">
-            <div><span class="dot" style="background:${stay.person.color}; display:inline-block; margin-right:8px;"></span><strong>${escapeHtml(stay.person.name)}</strong></div>
-            <div class="stay-meta">${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${this._formatDuration(stay.durationMs)}</div>
-            <div class="stay-meta">POI: ${poiName}${poiLink} · ${stay.samples} Snapshots</div>
+          <div class="stay-group">
+            <div class="stay-group-header">
+              <div class="stay-group-title">
+                <span class="dot" style="background:${cluster.person.color}; display:inline-block; margin-right:6px;"></span>
+                <span>${poiName}</span>
+                <span style="font-weight:normal; font-size:0.85rem; color:var(--secondary-text-color);">(${escapeHtml(cluster.person.name)})${poiLink}</span>
+              </div>
+              <span class="stay-group-badge">${cluster.stays.length}× · ${this._formatDuration(cluster.totalDurationMs)}</span>
+            </div>
+            ${visitsHtml}
           </div>
         `;
       })
       .join("");
-    container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div>${content}`;
+
+    container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${clusters.length} Orte)</div>${content}`;
   }
 
   static get properties() {

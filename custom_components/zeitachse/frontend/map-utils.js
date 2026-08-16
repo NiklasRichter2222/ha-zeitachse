@@ -17,6 +17,12 @@ export const toTimestamp = (entry) => {
   return parsed;
 };
 
+export const pointKey = (point) => {
+  if (!Array.isArray(point) || point.length !== 2) return "";
+  const [lat, lon] = point;
+  return `${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
+};
+
 // Returns Infinity for invalid input so callers can treat invalid points as "not near".
 export const haversineMeters = (firstPoint, secondPoint) => {
   if (!firstPoint || !secondPoint) {
@@ -48,6 +54,42 @@ export const simplifyPoints = (points, minDistanceMeters = 3) => {
   }
   result.push(points[points.length - 1]);
   return result;
+};
+
+// Spatially cluster stays within clusterRadiusMeters to prevent duplicate POI queries and overlapping pins
+export const clusterStays = (stays, clusterRadiusMeters = 75) => {
+  if (!Array.isArray(stays) || stays.length === 0) return [];
+  const clusters = [];
+  for (const stay of stays) {
+    if (!stay.point) continue;
+    let matchedCluster = null;
+    for (const cluster of clusters) {
+      if (haversineMeters(cluster.point, stay.point) <= clusterRadiusMeters) {
+        matchedCluster = cluster;
+        break;
+      }
+    }
+    if (matchedCluster) {
+      matchedCluster.stays.push(stay);
+      matchedCluster.totalDurationMs += stay.durationMs || 0;
+      matchedCluster.sampleCount += stay.samples || 1;
+      stay.clusterId = matchedCluster.id;
+      stay.canonicalPoint = matchedCluster.point;
+    } else {
+      const newCluster = {
+        id: `cluster_${clusters.length}_${pointKey(stay.point)}`,
+        point: stay.point,
+        totalDurationMs: stay.durationMs || 0,
+        sampleCount: stay.samples || 1,
+        stays: [stay],
+        person: stay.person,
+      };
+      stay.clusterId = newCluster.id;
+      stay.canonicalPoint = stay.point;
+      clusters.push(newCluster);
+    }
+  }
+  return clusters;
 };
 
 let leafletLoadingPromise = null;

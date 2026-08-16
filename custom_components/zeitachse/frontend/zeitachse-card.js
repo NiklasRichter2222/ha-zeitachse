@@ -1,5 +1,5 @@
 import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
-import { ensureLeafletLoaded, haversineMeters, simplifyPoints, toPoint, toTimestamp } from "./map-utils.js";
+import { clusterStays, ensureLeafletLoaded, haversineMeters, pointKey, simplifyPoints, toPoint, toTimestamp } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
@@ -70,6 +70,7 @@ class ZeitachseBaseCard extends HTMLElement {
     this.people = [];
     this.timelineByPerson = new Map();
     this.stays = [];
+    this.stayClusters = [];
     this.poiByPoint = new Map();
     this._poiLookupVersion = 0;
     this._loaded = false;
@@ -227,19 +228,21 @@ class ZeitachseBaseCard extends HTMLElement {
   }
 
   _refreshStaysAndPoi() {
-    const stays = this._collectStays();
-    this.stays = stays;
+    const rawStays = this._collectStays();
+    this.stays = rawStays;
+    const distanceMeters = this.staySettings?.distance_meters ?? DEFAULT_STAY_DISTANCE_METERS;
+    this.stayClusters = clusterStays(rawStays, distanceMeters);
     this._renderData();
-    this._loadPoiForStays(stays);
+    this._loadPoiForClusters(this.stayClusters);
   }
 
-  async _loadPoiForStays(stays) {
+  async _loadPoiForClusters(clusters) {
     const version = ++this._poiLookupVersion;
     const missing = new Map();
-    for (const stay of stays) {
-      const key = pointKey(stay.point);
+    for (const cluster of clusters) {
+      const key = pointKey(cluster.point);
       if (!key || this.poiByPoint.has(key) || missing.has(key)) continue;
-      missing.set(key, stay.point);
+      missing.set(key, cluster.point);
     }
     if (missing.size === 0) return;
 
@@ -328,6 +331,24 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         .legend-title { font-weight: 600; margin-bottom: 6px; }
         .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .leaflet-tooltip.zeitachse-poi-label {
+          position: absolute !important;
+          background: rgba(24, 24, 27, 0.88) !important;
+          color: #ffffff !important;
+          border: 1px solid rgba(255, 255, 255, 0.25) !important;
+          border-radius: 6px !important;
+          padding: 3px 8px !important;
+          font-size: 11px !important;
+          font-weight: 500 !important;
+          white-space: nowrap !important;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45) !important;
+          pointer-events: none !important;
+          backdrop-filter: blur(6px) !important;
+          -webkit-backdrop-filter: blur(6px) !important;
+        }
+        .leaflet-tooltip-top:before {
+          border-top-color: rgba(24, 24, 27, 0.88) !important;
+        }
         ${LEAFLET_SHADOW_CSS}
       </style>
       <ha-card>
@@ -366,6 +387,11 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "&copy; OpenStreetMap contributors",
       }).addTo(this.map);
+
+      this.map.on("zoomend", () => {
+        this._updateTooltipsVisibility();
+      });
+
       requestAnimationFrame(() => this.map?.invalidateSize(true));
       this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
       this._resizeObserver.observe(mapElement);
@@ -422,6 +448,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       this.map.removeLayer(layer);
     }
     this.layers = [];
+    this.stayMarkers = [];
 
     let hasData = false;
     for (const person of this.people) {
@@ -443,15 +470,17 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         radius: 7,
         renderer: window.L.canvas({ padding: 0.5 }),
       }).addTo(this.map);
-      marker.bindPopup(`${person.name} (${points.length} Punkte)`);
+      marker.bindPopup(`<strong>${escapeHtml(person.name)}</strong><br>${points.length} Snapshots`);
       this.layers.push(marker);
     }
 
-    for (const stay of this.stays) {
-      const key = pointKey(stay.point);
+    for (const cluster of this.stayClusters) {
+      hasData = true;
+      const key = pointKey(cluster.point);
       const poi = this.poiByPoint.get(key) || null;
-      const stayMarker = window.L.circleMarker(stay.point, {
-        radius: 8,
+      const radius = Math.min(14, 7 + Math.log2(cluster.stays.length + 1) * 2);
+      const stayMarker = window.L.circleMarker(cluster.point, {
+        radius,
         color: "#f57c00",
         fillColor: "#ff9800",
         fillOpacity: 0.9,
@@ -459,22 +488,21 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         renderer: window.L.canvas({ padding: 0.5 }),
       }).addTo(this.map);
       stayMarker._pointKey = key;
+      stayMarker._clusterId = cluster.id;
+
       const poiLabel = poi?.name ? escapeHtml(poi.name) : "Aufenthalt";
       const detailsLink = poi?.url
-        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+        ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos auf OSM</a>`
         : "";
+      const visitCountText = cluster.stays.length > 1
+        ? `${cluster.stays.length} Aufenthalte · Gesamtdauer ${this._formatDuration(cluster.totalDurationMs)}`
+        : `1 Aufenthalt · Dauer ${this._formatDuration(cluster.totalDurationMs)}`;
+
       stayMarker.bindPopup(
-        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${detailsLink}`
+        `<strong>${poiLabel}</strong><br>${visitCountText}<br>Person: ${escapeHtml(cluster.person.name)}${detailsLink}`
       );
-      if (poi?.name) {
-        stayMarker.bindTooltip(escapeHtml(poi.name), {
-          permanent: true,
-          direction: "top",
-          offset: [0, -8],
-          className: "zeitachse-poi-label",
-        });
-      }
       this.layers.push(stayMarker);
+      this.stayMarkers.push(stayMarker);
     }
 
     if (!hasData) {
@@ -488,7 +516,38 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         this.map.fitBounds(bounds, { padding: [20, 20] });
       }
     }
+    this._updateTooltipsVisibility();
     this.map.invalidateSize(true);
+  }
+
+  _updateTooltipsVisibility() {
+    if (!this.map) return;
+    const currentZoom = this.map.getZoom();
+    const sortedClusters = [...this.stayClusters].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
+    let maxVisibleTooltips = sortedClusters.length;
+    if (currentZoom < 10) {
+      maxVisibleTooltips = 3;
+    } else if (currentZoom < 13) {
+      maxVisibleTooltips = 8;
+    }
+
+    const visibleClusterIds = new Set(
+      sortedClusters.slice(0, maxVisibleTooltips).map((c) => c.id)
+    );
+
+    for (const marker of (this.stayMarkers || [])) {
+      const poi = this.poiByPoint.get(marker._pointKey);
+      const isVisible = visibleClusterIds.has(marker._clusterId);
+      marker.unbindTooltip();
+      if (poi?.name && isVisible) {
+        marker.bindTooltip(escapeHtml(poi.name), {
+          permanent: true,
+          direction: "top",
+          offset: [0, -8],
+          className: "zeitachse-poi-label",
+        });
+      }
+    }
   }
 }
 
@@ -579,8 +638,8 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
       return;
     }
 
-    const stays = this.stays;
-    if (!stays.length) {
+    const clusters = this.stayClusters;
+    if (!clusters.length) {
       container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
       return;
     }
@@ -589,23 +648,36 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
       dateStyle: "short",
       timeStyle: "short",
     });
-    const content = stays
-      .map((stay) => {
-        const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
-        const poiName = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
+    const content = clusters
+      .map((cluster) => {
+        const key = pointKey(cluster.point);
+        const poi = this.poiByPoint.get(key) || null;
+        const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
         const poiLink = poi?.url
-          ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
+          ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
           : "";
+        const visitsHtml = cluster.stays
+          .map((stay) => `
+            <div class="stay-sub-item" style="margin-top:4px; padding-top:4px; border-top:1px dashed var(--divider-color); font-size:0.85rem; color:var(--secondary-text-color);">
+              <div>${formatter.format(stay.start)} → ${formatter.format(stay.end)} · <strong>${this._formatDuration(stay.durationMs)}</strong> (${stay.samples} Snapshots)</div>
+            </div>
+          `)
+          .join("");
         return `
-          <div class="stay-item">
-            <div><span class="dot" style="background:${stay.person.color}"></span><strong>${escapeHtml(stay.person.name)}</strong></div>
-            <div class="stay-meta">${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${this._formatDuration(stay.durationMs)}</div>
-            <div class="stay-meta">POI: ${poiName}${poiLink} · ${stay.samples} Snapshots</div>
+          <div class="stay-item" style="border-top:1px solid var(--divider-color); padding:8px 0;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <span class="dot" style="background:${person.color}; display:inline-block; margin-right:6px;"></span>
+                <strong>${poiName}</strong>${poiLink}
+              </div>
+              <span style="background:var(--primary-color, #03a9f4); color:#fff; border-radius:10px; padding:1px 6px; font-size:0.75rem; font-weight:600;">${cluster.stays.length}× · ${this._formatDuration(cluster.totalDurationMs)}</span>
+            </div>
+            ${visitsHtml}
           </div>
         `;
       })
       .join("");
-    container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div>${content}`;
+    container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${clusters.length} Orte)</div>${content}`;
   }
 }
 
