@@ -34,6 +34,53 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function groupStaysByPeriod(stays, selectedRange) {
+  const groups = new Map();
+  const dayFormatter = new Intl.DateTimeFormat("de-DE", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const monthFormatter = new Intl.DateTimeFormat("de-DE", {
+    month: "long",
+    year: "numeric",
+  });
+  const shortDayFormatter = new Intl.DateTimeFormat("de-DE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+
+  for (const stay of stays) {
+    const start = stay.start;
+    if (!start) continue;
+
+    let key = "";
+    let title = "";
+
+    if (selectedRange === "1y") {
+      key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
+      title = monthFormatter.format(start);
+    } else if (selectedRange === "1m") {
+      key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+      title = shortDayFormatter.format(start);
+    } else {
+      key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+      title = dayFormatter.format(start);
+    }
+
+    if (!groups.has(key)) {
+      groups.set(key, { title, stays: [], totalDurationMs: 0 });
+    }
+    const group = groups.get(key);
+    group.stays.push(stay);
+    group.totalDurationMs += stay.durationMs || 0;
+  }
+
+  return Array.from(groups.values());
+}
+
 class ZeitachsePanel extends HTMLElement {
   constructor() {
     super();
@@ -50,6 +97,7 @@ class ZeitachsePanel extends HTMLElement {
     this._mapInitFailed = false;
     this._isFullMap = false;
     this._poiLookupVersion = 0;
+    this._lastZoom = null;
     this.selectedRange = "1d";
     this.staySettings = {
       min_snapshots: DEFAULT_STAY_MIN_SNAPSHOTS,
@@ -119,7 +167,6 @@ class ZeitachsePanel extends HTMLElement {
           overflow: hidden;
           border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
           box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-          transition: flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .map-wrapper.full-map {
           flex: 1 1 100%;
@@ -200,19 +247,48 @@ class ZeitachsePanel extends HTMLElement {
           overflow-y: auto;
           box-sizing: border-box;
           background: var(--card-background-color, #1e1e1e);
-          transition: flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .stay-list-panel.hidden {
           display: none;
         }
-        .stay-title { font-weight: 600; font-size: 1rem; margin-bottom: 10px; color: var(--primary-text-color, #ffffff); }
+        .stay-header-title {
+          font-weight: 600;
+          font-size: 1rem;
+          margin-bottom: 12px;
+          color: var(--primary-text-color, #ffffff);
+        }
+        .stay-section {
+          margin-bottom: 14px;
+        }
+        .stay-section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 6px 10px;
+          background: rgba(255, 255, 255, 0.04);
+          border-left: 3px solid var(--primary-color, #03a9f4);
+          border-radius: 4px 8px 8px 4px;
+          font-weight: 600;
+          font-size: 0.9rem;
+          color: var(--primary-text-color, #ffffff);
+          margin-bottom: 6px;
+        }
+        .stay-section-badge {
+          font-size: 0.75rem;
+          font-weight: normal;
+          color: var(--secondary-text-color, #aaaaaa);
+        }
         .stay-item {
-          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
-          padding: 8px 0;
+          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.06));
+          padding: 7px 8px;
+          transition: background-color 0.15s ease;
         }
         .stay-item:first-of-type {
           border-top: none;
-          padding-top: 0;
+        }
+        .stay-item:hover {
+          background-color: rgba(255, 255, 255, 0.02);
+          border-radius: 6px;
         }
         .stay-item-header {
           display: flex;
@@ -222,7 +298,7 @@ class ZeitachsePanel extends HTMLElement {
         }
         .stay-item-title {
           font-weight: 600;
-          font-size: 0.95rem;
+          font-size: 0.92rem;
           display: flex;
           align-items: center;
           gap: 6px;
@@ -230,22 +306,22 @@ class ZeitachsePanel extends HTMLElement {
         }
         .stay-person-tag {
           font-weight: normal;
-          font-size: 0.85rem;
+          font-size: 0.82rem;
           color: var(--secondary-text-color, #aaaaaa);
         }
         .stay-duration-tag {
           background: var(--primary-color, #03a9f4);
           color: #ffffff;
           border-radius: 10px;
-          padding: 2px 8px;
+          padding: 1px 7px;
           font-size: 0.75rem;
           font-weight: 600;
           flex-shrink: 0;
         }
         .stay-meta {
           color: var(--secondary-text-color, #aaaaaa);
-          font-size: 0.85rem;
-          margin-top: 3px;
+          font-size: 0.82rem;
+          margin-top: 2px;
         }
         .stay-empty { color: var(--secondary-text-color); font-size: 0.9rem; }
         
@@ -309,7 +385,11 @@ class ZeitachsePanel extends HTMLElement {
         iconExpand.style.display = "block";
         iconShrink.style.display = "none";
       }
-      setTimeout(() => this.map?.invalidateSize(true), 260);
+      requestAnimationFrame(() => {
+        if (this.map) {
+          this.map.invalidateSize(false);
+        }
+      });
     });
   }
 
@@ -346,8 +426,20 @@ class ZeitachsePanel extends HTMLElement {
         this._updateTooltipsVisibility();
       });
 
-      requestAnimationFrame(() => this.map?.invalidateSize(true));
-      this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
+      requestAnimationFrame(() => this.map?.invalidateSize(false));
+      
+      let resizeScheduled = false;
+      this._resizeObserver = new ResizeObserver(() => {
+        if (!resizeScheduled) {
+          resizeScheduled = true;
+          requestAnimationFrame(() => {
+            resizeScheduled = false;
+            if (this.map) {
+              this.map.invalidateSize(false);
+            }
+          });
+        }
+      });
       this._resizeObserver.observe(mapElement);
       console.debug("[zeitachse-panel] Map initialized");
       this._mapInitFailed = false;
@@ -418,9 +510,6 @@ class ZeitachsePanel extends HTMLElement {
           start,
         });
         this.timelineByPerson.set(person.entity_id, timeline.timeline || []);
-        console.debug(
-          `[zeitachse-panel] Loaded ${this.timelineByPerson.get(person.entity_id).length} snapshots for ${person.entity_id}`
-        );
       })
     );
   }
@@ -557,6 +646,7 @@ class ZeitachsePanel extends HTMLElement {
     }
     this.layers = [];
     this.stayMarkers = [];
+    this._lastZoom = null;
 
     const tolerance = RANGE_TOLERANCE_METERS[this.selectedRange] || 3;
     let hasData = false;
@@ -628,21 +718,15 @@ class ZeitachsePanel extends HTMLElement {
     }
 
     this._updateTooltipsVisibility();
-    this.map.invalidateSize(true);
+    requestAnimationFrame(() => this.map?.invalidateSize(false));
   }
 
   _updateTooltipsVisibility() {
     if (!this.map) return;
     const currentZoom = this.map.getZoom();
     
-    // Sort clusters by importance: totalDurationMs
     const sortedClusters = [...this.stayClusters].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
     
-    // Generous decluttering thresholds so labels appear early:
-    // zoom < 7: top 15 places
-    // zoom 7-10: top 30 places
-    // zoom 11-12: top 60 places
-    // zoom >= 13: all places
     let maxVisibleTooltips = sortedClusters.length;
     if (currentZoom < 7) {
       maxVisibleTooltips = 15;
@@ -778,43 +862,62 @@ class ZeitachsePanel extends HTMLElement {
 
     const stays = this.stays;
     if (!stays.length) {
-      container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
+      container.innerHTML = `<div class="stay-header-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
       return;
     }
 
-    const formatter = new Intl.DateTimeFormat("de-DE", {
-      dateStyle: "short",
-      timeStyle: "short",
+    const timeFormatter = new Intl.DateTimeFormat("de-DE", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
 
-    const content = stays
-      .map((stay) => {
-        const key = pointKey(stay.canonicalPoint || stay.point);
-        const poi = this.poiByPoint.get(key) || null;
-        const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
-        const poiLink = poi?.url
-          ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
-          : "";
+    const groups = groupStaysByPeriod(stays, this.selectedRange);
+
+    const sectionsHtml = groups
+      .map((group) => {
+        const itemsHtml = group.stays
+          .map((stay) => {
+            const key = pointKey(stay.canonicalPoint || stay.point);
+            const poi = this.poiByPoint.get(key) || null;
+            const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
+            const poiLink = poi?.url
+              ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
+              : "";
+
+            return `
+              <div class="stay-item">
+                <div class="stay-item-header">
+                  <div class="stay-item-title">
+                    <span class="dot" style="background:${stay.person.color};"></span>
+                    <span>${poiName}</span>
+                    <span class="stay-person-tag">(${escapeHtml(stay.person.name)})${poiLink}</span>
+                  </div>
+                  <span class="stay-duration-tag">${this._formatDuration(stay.durationMs)}</span>
+                </div>
+                <div class="stay-meta">
+                  ${timeFormatter.format(stay.start)} → ${timeFormatter.format(stay.end)} · ${stay.samples} Snapshots
+                </div>
+              </div>
+            `;
+          })
+          .join("");
 
         return `
-          <div class="stay-item">
-            <div class="stay-item-header">
-              <div class="stay-item-title">
-                <span class="dot" style="background:${stay.person.color};"></span>
-                <strong>${poiName}</strong>
-                <span class="stay-person-tag">(${escapeHtml(stay.person.name)})${poiLink}</span>
-              </div>
-              <span class="stay-duration-tag">${this._formatDuration(stay.durationMs)}</span>
+          <div class="stay-section">
+            <div class="stay-section-header">
+              <span>📅 ${escapeHtml(group.title)}</span>
+              <span class="stay-section-badge">${group.stays.length} Aufenthalte · ${this._formatDuration(group.totalDurationMs)}</span>
             </div>
-            <div class="stay-meta">
-              ${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${stay.samples} Snapshots
-            </div>
+            ${itemsHtml}
           </div>
         `;
       })
       .join("");
 
-    container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${stays.length} Besuche)</div>${content}`;
+    container.innerHTML = `
+      <div class="stay-header-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${stays.length} Besuche gesamt)</div>
+      ${sectionsHtml}
+    `;
   }
 
   static get properties() {

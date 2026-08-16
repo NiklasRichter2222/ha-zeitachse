@@ -13,6 +13,7 @@ from aiohttp import ClientError
 from homeassistant.const import ATTR_FRIENDLY_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
@@ -20,11 +21,13 @@ _NOMINATIM_ZOOM_LEVEL = 18
 _REQUEST_TIMEOUT_SECONDS = 5
 _MIN_REQUEST_SPACING_SECONDS = 1
 _MAX_CACHE_SIZE = 1000
+_POI_STORAGE_KEY = "zeitachse_poi_cache"
+_POI_STORAGE_VERSION = 1
 _USER_AGENT = "ha-zeitachse/0.1.0 (+https://github.com/NiklasRichter2222/ha-zeitachse)"
 
 
 class PoiLookupService:
-    """Resolve POIs for coordinates using free reverse geocoding."""
+    """Resolve POIs for coordinates using free reverse geocoding and persistent caching."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize POI lookup service."""
@@ -33,12 +36,37 @@ class PoiLookupService:
         self._cache: OrderedDict[tuple[float, float], dict[str, Any] | None] = (
             OrderedDict()
         )
+        self._store = Store[dict[str, Any]](
+            hass, _POI_STORAGE_VERSION, _POI_STORAGE_KEY
+        )
+        self._loaded_from_disk = False
         self._request_lock = asyncio.Lock()
         self._last_request_monotonic = 0.0
         self._headers = {
             "Accept": "application/json",
             "User-Agent": _USER_AGENT,
         }
+
+    async def _async_ensure_loaded(self) -> None:
+        """Load persistent POI cache from disk on first lookup."""
+        if self._loaded_from_disk:
+            return
+        self._loaded_from_disk = True
+        try:
+            stored = await self._store.async_load()
+            if isinstance(stored, dict):
+                for key_str, val in stored.items():
+                    try:
+                        lat_str, lon_str = key_str.split(",")
+                        key = (float(lat_str), float(lon_str))
+                        self._cache[key] = val
+                    except (ValueError, TypeError):
+                        continue
+                _LOGGER.debug(
+                    "Loaded %d persistent POIs from disk", len(self._cache)
+                )
+        except Exception:
+            _LOGGER.debug("Failed to load persistent POI cache from disk", exc_info=True)
 
     def _cache_key(self, latitude: float, longitude: float) -> tuple[float, float]:
         """Return rounded cache key for nearby coordinates."""
@@ -47,11 +75,21 @@ class PoiLookupService:
     def _cache_set(
         self, key: tuple[float, float], value: dict[str, Any] | None
     ) -> None:
-        """Store value in bounded LRU cache."""
+        """Store value in bounded LRU cache and persist."""
         self._cache[key] = value
         self._cache.move_to_end(key)
         if len(self._cache) > _MAX_CACHE_SIZE:
             self._cache.popitem(last=False)
+        self._async_schedule_save()
+
+    def _async_schedule_save(self) -> None:
+        """Schedule saving the cache to disk."""
+        data_to_save = {
+            f"{k[0]},{k[1]}": v
+            for k, v in self._cache.items()
+            if v is not None
+        }
+        self._hass.async_create_task(self._store.async_save(data_to_save))
 
     async def _async_wait_for_rate_limit(self) -> None:
         """Ensure Nominatim rate limit is respected."""
@@ -268,6 +306,7 @@ class PoiLookupService:
         self, latitude: float, longitude: float
     ) -> dict[str, Any] | None:
         """Look up POI metadata for a coordinate."""
+        await self._async_ensure_loaded()
         key = self._cache_key(latitude, longitude)
         if key in self._cache:
             self._cache.move_to_end(key)

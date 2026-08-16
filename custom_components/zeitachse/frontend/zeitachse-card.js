@@ -37,6 +37,53 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function groupStaysByPeriod(stays, selectedRange) {
+  const groups = new Map();
+  const dayFormatter = new Intl.DateTimeFormat("de-DE", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const monthFormatter = new Intl.DateTimeFormat("de-DE", {
+    month: "long",
+    year: "numeric",
+  });
+  const shortDayFormatter = new Intl.DateTimeFormat("de-DE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+
+  for (const stay of stays) {
+    const start = stay.start;
+    if (!start) continue;
+
+    let key = "";
+    let title = "";
+
+    if (selectedRange === "1y") {
+      key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
+      title = monthFormatter.format(start);
+    } else if (selectedRange === "1m") {
+      key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+      title = shortDayFormatter.format(start);
+    } else {
+      key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+      title = dayFormatter.format(start);
+    }
+
+    if (!groups.has(key)) {
+      groups.set(key, { title, stays: [], totalDurationMs: 0 });
+    }
+    const group = groups.get(key);
+    group.stays.push(stay);
+    group.totalDurationMs += stay.durationMs || 0;
+  }
+
+  return Array.from(groups.values());
+}
+
 function pointKey(point) {
   if (!Array.isArray(point) || point.length !== 2) return "";
   const [lat, lon] = point;
@@ -399,8 +446,20 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         this._updateTooltipsVisibility();
       });
 
-      requestAnimationFrame(() => this.map?.invalidateSize(true));
-      this._resizeObserver = new ResizeObserver(() => this.map?.invalidateSize(true));
+      requestAnimationFrame(() => this.map?.invalidateSize(false));
+      
+      let resizeScheduled = false;
+      this._resizeObserver = new ResizeObserver(() => {
+        if (!resizeScheduled) {
+          resizeScheduled = true;
+          requestAnimationFrame(() => {
+            resizeScheduled = false;
+            if (this.map) {
+              this.map.invalidateSize(false);
+            }
+          });
+        }
+      });
       this._resizeObserver.observe(mapElement);
       this._mapInitFailed = false;
       return true;
@@ -654,36 +713,54 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
       return;
     }
 
-    const formatter = new Intl.DateTimeFormat("de-DE", {
-      dateStyle: "short",
-      timeStyle: "short",
+    const timeFormatter = new Intl.DateTimeFormat("de-DE", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
-    const content = stays
-      .map((stay) => {
-        const key = pointKey(stay.canonicalPoint || stay.point);
-        const poi = this.poiByPoint.get(key) || null;
-        const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
-        const poiLink = poi?.url
-          ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
-          : "";
+
+    const groups = groupStaysByPeriod(stays, this.selectedRange);
+
+    const sectionsHtml = groups
+      .map((group) => {
+        const itemsHtml = group.stays
+          .map((stay) => {
+            const key = pointKey(stay.canonicalPoint || stay.point);
+            const poi = this.poiByPoint.get(key) || null;
+            const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
+            const poiLink = poi?.url
+              ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
+              : "";
+
+            return `
+              <div class="stay-item" style="border-top:1px solid var(--divider-color); padding:6px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <span class="dot" style="background:${person.color}; display:inline-block; margin-right:6px;"></span>
+                    <strong>${poiName}</strong>${poiLink}
+                  </div>
+                  <span style="background:var(--primary-color, #03a9f4); color:#fff; border-radius:10px; padding:1px 6px; font-size:0.75rem; font-weight:600;">${this._formatDuration(stay.durationMs)}</span>
+                </div>
+                <div style="color:var(--secondary-text-color); font-size:0.82rem; margin-top:2px;">
+                  ${timeFormatter.format(stay.start)} → ${timeFormatter.format(stay.end)} · ${stay.samples} Snapshots
+                </div>
+              </div>
+            `;
+          })
+          .join("");
 
         return `
-          <div class="stay-item" style="border-top:1px solid var(--divider-color); padding:8px 0;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <span class="dot" style="background:${person.color}; display:inline-block; margin-right:6px;"></span>
-                <strong>${poiName}</strong>${poiLink}
-              </div>
-              <span style="background:var(--primary-color, #03a9f4); color:#fff; border-radius:10px; padding:1px 6px; font-size:0.75rem; font-weight:600;">${this._formatDuration(stay.durationMs)}</span>
+          <div style="margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; background:rgba(255,255,255,0.04); border-left:3px solid var(--primary-color, #03a9f4); border-radius:4px; font-weight:600; font-size:0.88rem; margin-bottom:4px;">
+              <span>📅 ${escapeHtml(group.title)}</span>
+              <span style="font-size:0.75rem; font-weight:normal; color:var(--secondary-text-color);">${group.stays.length} Aufenthalte · ${this._formatDuration(group.totalDurationMs)}</span>
             </div>
-            <div style="color:var(--secondary-text-color); font-size:0.85rem; margin-top:3px;">
-              ${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${stay.samples} Snapshots
-            </div>
+            ${itemsHtml}
           </div>
         `;
       })
       .join("");
-    container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${stays.length} Besuche)</div>${content}`;
+
+    container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${stays.length} Besuche)</div>${sectionsHtml}`;
   }
 }
 

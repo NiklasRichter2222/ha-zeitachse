@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ def mock_hass():
     """Mock HomeAssistant instance."""
     hass = MagicMock()
     hass.states.async_all.return_value = []
+    hass.async_create_task = lambda coro, *args, **kwargs: asyncio.create_task(coro)
     return hass
 
 

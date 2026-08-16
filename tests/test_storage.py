@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
@@ -95,15 +95,16 @@ async def test_encrypted_storage_max_snapshots_pruning(mock_hass):
     key = Fernet.generate_key().decode()
     storage = EncryptedSnapshotStorage(mock_hass, "snapshots.enc", key)
 
-    # Pre-fill cache directly to test overflow boundary
-    cached = [{"id": i} for i in range(MAX_SNAPSHOTS_PER_PERSON)]
-    storage._cache = {"person.bob": cached}
+    with patch("custom_components.zeitachse.storage.MAX_SNAPSHOTS_PER_PERSON", 5):
+        # Pre-fill cache directly to test overflow boundary
+        cached = [{"id": i} for i in range(5)]
+        storage._cache = {"person.bob": cached}
 
-    await storage.async_append("person.bob", {"id": "overflow"})
-    timeline = await storage.async_get_person_timeline("person.bob")
-    assert len(timeline) == MAX_SNAPSHOTS_PER_PERSON
-    assert timeline[-1]["id"] == "overflow"
-    assert timeline[0]["id"] == 1
+        await storage.async_append("person.bob", {"id": "overflow"})
+        timeline = await storage.async_get_person_timeline("person.bob")
+        assert len(timeline) == 5
+        assert timeline[-1]["id"] == "overflow"
+        assert timeline[0]["id"] == 1
 
 
 @pytest.mark.asyncio
