@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
@@ -22,7 +21,9 @@ from .const import (
 class EncryptedSnapshotStorage:
     """Store snapshots encrypted on disk."""
 
-    def __init__(self, hass: HomeAssistant, file_path: str, encryption_key: str) -> None:
+    def __init__(
+        self, hass: HomeAssistant, file_path: str, encryption_key: str
+    ) -> None:
         """Initialize encrypted storage."""
         self._hass = hass
         self._file_path = hass.config.path(file_path)
@@ -53,7 +54,9 @@ class EncryptedSnapshotStorage:
         }
         return self._cache
 
-    async def async_append(self, person_entity_id: str, snapshot: dict[str, Any]) -> None:
+    async def async_append(
+        self, person_entity_id: str, snapshot: dict[str, Any]
+    ) -> None:
         """Append a snapshot and persist encrypted payload."""
         data = await self.async_load()
         snapshots = data.setdefault(person_entity_id, [])
@@ -62,7 +65,9 @@ class EncryptedSnapshotStorage:
             del snapshots[:-MAX_SNAPSHOTS_PER_PERSON]
         await self._async_persist(data)
 
-    async def async_get_person_timeline(self, person_entity_id: str) -> list[dict[str, Any]]:
+    async def async_get_person_timeline(
+        self, person_entity_id: str
+    ) -> list[dict[str, Any]]:
         """Return snapshots for one person."""
         data = await self.async_load()
         return list(data.get(person_entity_id, []))
@@ -78,13 +83,23 @@ class EncryptedSnapshotStorage:
         await self._async_persist(normalized)
 
     async def _async_persist(self, data: dict[str, list[dict[str, Any]]]) -> None:
-        """Persist snapshot payload encrypted on disk."""
+        """Persist snapshot payload encrypted on disk with secure permissions."""
         payload = json.dumps(data, separators=(",", ":")).encode()
         encrypted = self._fernet.encrypt(payload)
 
         path = Path(self._file_path)
-        await self._hass.async_add_executor_job(lambda: path.parent.mkdir(parents=True, exist_ok=True))
-        await self._hass.async_add_executor_job(path.write_bytes, encrypted)
+
+        def _write_secure() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_bytes(encrypted)
+            try:
+                tmp_path.chmod(0o600)
+            except OSError:
+                pass
+            tmp_path.replace(path)
+
+        await self._hass.async_add_executor_job(_write_secure)
 
 
 class UserPreferenceStorage:

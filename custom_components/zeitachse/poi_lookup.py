@@ -10,7 +10,6 @@ from collections import OrderedDict
 from typing import Any
 
 from aiohttp import ClientError
-
 from homeassistant.const import ATTR_FRIENDLY_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -31,7 +30,9 @@ class PoiLookupService:
         """Initialize POI lookup service."""
         self._hass = hass
         self._session = async_get_clientsession(hass)
-        self._cache: OrderedDict[tuple[float, float], dict[str, Any] | None] = OrderedDict()
+        self._cache: OrderedDict[tuple[float, float], dict[str, Any] | None] = (
+            OrderedDict()
+        )
         self._request_lock = asyncio.Lock()
         self._last_request_monotonic = 0.0
         self._headers = {
@@ -43,7 +44,9 @@ class PoiLookupService:
         """Return rounded cache key for nearby coordinates."""
         return (round(latitude, 5), round(longitude, 5))
 
-    def _cache_set(self, key: tuple[float, float], value: dict[str, Any] | None) -> None:
+    def _cache_set(
+        self, key: tuple[float, float], value: dict[str, Any] | None
+    ) -> None:
         """Store value in bounded LRU cache."""
         self._cache[key] = value
         self._cache.move_to_end(key)
@@ -67,23 +70,87 @@ class PoiLookupService:
 
     @classmethod
     def _extract_poi_name(cls, data: dict[str, Any]) -> str | None:
-        """Extract a useful POI name from Nominatim response."""
+        """Extract a POI name with strict 3-tier priority:
+        1. Configured HA Zone (handled in _lookup_homeassistant_zone)
+        2. Business, shop, institution, amenity, leisure, tourism, office
+        3. Street name (+ house number) or neighborhood/city
+        """
+        address = data.get("address") if isinstance(data.get("address"), dict) else {}
+
+        # 2nd Priority: Specific business, institution, amenity or attraction name
         if isinstance(data.get("name"), str) and data["name"].strip():
             candidate = data["name"].strip()
             if cls._is_useful_name(candidate):
                 return candidate
-        address = data.get("address") or {}
-        for key in ("amenity", "shop", "tourism", "leisure", "railway", "building", "office"):
+
+        poi_keys = (
+            "amenity",
+            "shop",
+            "tourism",
+            "leisure",
+            "office",
+            "healthcare",
+            "historic",
+            "craft",
+            "building",
+            "commercial",
+            "industrial",
+            "railway",
+            "aeroway",
+            "public_transport",
+        )
+        for key in poi_keys:
             value = address.get(key)
             if isinstance(value, str) and value.strip():
                 candidate = value.strip()
                 if cls._is_useful_name(candidate):
                     return candidate
+
+        # 3rd Priority: Street name (+ house number if available) or area
+        street_keys = (
+            "road",
+            "pedestrian",
+            "footway",
+            "cycleway",
+            "path",
+            "street",
+            "square",
+            "plaza",
+            "residential",
+        )
+        for key in street_keys:
+            street_val = address.get(key)
+            if isinstance(street_val, str) and street_val.strip():
+                street = street_val.strip()
+                house_num = address.get("house_number")
+                if isinstance(house_num, str) and house_num.strip():
+                    return f"{street} {house_num.strip()}"
+                return street
+
+        area_keys = (
+            "suburb",
+            "neighbourhood",
+            "quarter",
+            "city_district",
+            "hamlet",
+            "village",
+            "town",
+            "city",
+            "municipality",
+        )
+        for key in area_keys:
+            area_val = address.get(key)
+            if isinstance(area_val, str) and area_val.strip():
+                candidate = area_val.strip()
+                if cls._is_useful_name(candidate):
+                    return candidate
+
         display_name = data.get("display_name")
         if isinstance(display_name, str) and display_name.strip():
             candidate = display_name.split(",")[0].strip()
             if cls._is_useful_name(candidate):
                 return candidate
+
         return None
 
     @staticmethod
@@ -93,7 +160,14 @@ class PoiLookupService:
         osm_type = data.get("osm_type")
         if not osm_id or not isinstance(osm_type, str):
             return None
-        type_map = {"N": "node", "W": "way", "R": "relation"}
+        type_map = {
+            "N": "node",
+            "W": "way",
+            "R": "relation",
+            "NODE": "node",
+            "WAY": "way",
+            "RELATION": "relation",
+        }
         mapped = type_map.get(osm_type.upper())
         if not mapped:
             return None
@@ -120,18 +194,24 @@ class PoiLookupService:
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return 6_371_000 * c
 
-    def _lookup_homeassistant_zone(self, latitude: float, longitude: float) -> dict[str, Any] | None:
+    def _lookup_homeassistant_zone(
+        self, latitude: float, longitude: float
+    ) -> dict[str, Any] | None:
         """Resolve a matching Home Assistant zone for coordinates."""
         best_match: tuple[float, dict[str, Any]] | None = None
         for state in self._hass.states.async_all("zone"):
             zone_lat = state.attributes.get("latitude")
             zone_lon = state.attributes.get("longitude")
             zone_radius = state.attributes.get("radius", 0)
-            if not isinstance(zone_lat, (int, float)) or not isinstance(zone_lon, (int, float)):
+            if not isinstance(zone_lat, (int, float)) or not isinstance(
+                zone_lon, (int, float)
+            ):
                 continue
             if not isinstance(zone_radius, (int, float)) or zone_radius <= 0:
                 continue
-            distance = self._haversine_meters(latitude, longitude, float(zone_lat), float(zone_lon))
+            distance = self._haversine_meters(
+                latitude, longitude, float(zone_lat), float(zone_lon)
+            )
             if distance > float(zone_radius):
                 continue
             zone_name_raw = (
@@ -151,7 +231,9 @@ class PoiLookupService:
                 best_match = (distance, zone)
         return best_match[1] if best_match else None
 
-    async def async_lookup(self, latitude: float, longitude: float) -> dict[str, Any] | None:
+    async def async_lookup(
+        self, latitude: float, longitude: float
+    ) -> dict[str, Any] | None:
         """Look up POI metadata for a coordinate."""
         key = self._cache_key(latitude, longitude)
         if key in self._cache:

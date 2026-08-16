@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import inspect
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -64,7 +63,9 @@ class ZeitachseRuntimeData:
         )
 
 
-def _infer_self_person(hass: HomeAssistant, user_id: str, person_ids: list[str]) -> str | None:
+def _infer_self_person(
+    hass: HomeAssistant, user_id: str, person_ids: list[str]
+) -> str | None:
     """Resolve the matching person entity for a user id."""
     for entity_id in person_ids:
         state = hass.states.get(entity_id)
@@ -96,11 +97,15 @@ async def _maybe_await(value: Any) -> None:
         await value
 
 
-def _person_payload(hass: HomeAssistant, person_entity_id: str, color: str, active: bool) -> dict[str, Any]:
+def _person_payload(
+    hass: HomeAssistant, person_entity_id: str, color: str, active: bool
+) -> dict[str, Any]:
     state = hass.states.get(person_entity_id)
     return {
         "entity_id": person_entity_id,
-        "name": state.attributes.get("friendly_name", person_entity_id) if state else person_entity_id,
+        "name": state.attributes.get("friendly_name", person_entity_id)
+        if state
+        else person_entity_id,
         "color": color,
         "active": active,
     }
@@ -117,7 +122,9 @@ def _is_valid_hex_color(value: Any) -> bool:
     return True
 
 
-async def _get_person_colors(runtime: ZeitachseRuntimeData, _user_id: str) -> dict[str, str]:
+async def _get_person_colors(
+    runtime: ZeitachseRuntimeData, _user_id: str
+) -> dict[str, str]:
     """Return configured person colors for tracked people."""
     raw = runtime.config_entry.options.get(
         CONF_PERSON_COLORS,
@@ -153,22 +160,32 @@ def _coerce_stay_settings(raw: Any) -> dict[str, int]:
     if not isinstance(distance_meters, int):
         distance_meters = DEFAULT_STAY_DISTANCE_METERS
     return {
-        "min_snapshots": _clamp(min_snapshots, MIN_STAY_MIN_SNAPSHOTS, MAX_STAY_MIN_SNAPSHOTS),
-        "distance_meters": _clamp(distance_meters, MIN_STAY_DISTANCE_METERS, MAX_STAY_DISTANCE_METERS),
+        "min_snapshots": _clamp(
+            min_snapshots, MIN_STAY_MIN_SNAPSHOTS, MAX_STAY_MIN_SNAPSHOTS
+        ),
+        "distance_meters": _clamp(
+            distance_meters, MIN_STAY_DISTANCE_METERS, MAX_STAY_DISTANCE_METERS
+        ),
     }
 
 
-async def _get_stay_settings(runtime: ZeitachseRuntimeData, _user_id: str) -> dict[str, int]:
+async def _get_stay_settings(
+    runtime: ZeitachseRuntimeData, _user_id: str
+) -> dict[str, int]:
     """Return configured stay detection settings."""
     return _coerce_stay_settings(
         {
             "min_snapshots": runtime.config_entry.options.get(
                 CONF_STAY_MIN_SNAPSHOTS,
-                runtime.config_entry.data.get(CONF_STAY_MIN_SNAPSHOTS, DEFAULT_STAY_MIN_SNAPSHOTS),
+                runtime.config_entry.data.get(
+                    CONF_STAY_MIN_SNAPSHOTS, DEFAULT_STAY_MIN_SNAPSHOTS
+                ),
             ),
             "distance_meters": runtime.config_entry.options.get(
                 CONF_STAY_DISTANCE_METERS,
-                runtime.config_entry.data.get(CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS),
+                runtime.config_entry.data.get(
+                    CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS
+                ),
             ),
         }
     )
@@ -195,7 +212,9 @@ async def ws_list_people(
         )
         for index, entity_id in enumerate(runtime.tracked_persons)
     ]
-    connection.send_result(msg["id"], {"people": people, "stay_settings": stay_settings})
+    connection.send_result(
+        msg["id"], {"people": people, "stay_settings": stay_settings}
+    )
 
 
 @websocket_api.websocket_command(
@@ -242,7 +261,9 @@ async def ws_set_person_colors(
     updated_options = dict(runtime.config_entry.options)
     updated_options[CONF_PERSON_COLORS] = colors
     await _maybe_await(
-        hass.config_entries.async_update_entry(runtime.config_entry, options=updated_options)
+        hass.config_entries.async_update_entry(
+            runtime.config_entry, options=updated_options
+        )
     )
     connection.send_result(msg["id"], {"person_colors": colors})
 
@@ -302,11 +323,15 @@ async def ws_get_timeline(
     )
     if entity_id not in runtime.tracked_persons:
         _LOGGER.debug("Timeline request rejected: entity %s is not tracked", entity_id)
-        connection.send_error(msg["id"], "not_tracked", "Person is not configured for tracking")
+        connection.send_error(
+            msg["id"], "not_tracked", "Person is not configured for tracking"
+        )
         return
 
     timeline = await runtime.snapshot_storage.async_get_person_timeline(entity_id)
-    _LOGGER.debug("Loaded %d snapshots for entity %s before filtering", len(timeline), entity_id)
+    _LOGGER.debug(
+        "Loaded %d snapshots for entity %s before filtering", len(timeline), entity_id
+    )
     start: datetime | None = msg.get("start")
     end: datetime | None = msg.get("end")
     if start and start.tzinfo is None:
@@ -338,7 +363,9 @@ async def ws_get_timeline(
             dropped_invalid,
         )
 
-    _LOGGER.debug("Sending timeline response: entity_id=%s snapshots=%d", entity_id, len(timeline))
+    _LOGGER.debug(
+        "Sending timeline response: entity_id=%s snapshots=%d", entity_id, len(timeline)
+    )
     connection.send_result(msg["id"], {"timeline": timeline})
 
 

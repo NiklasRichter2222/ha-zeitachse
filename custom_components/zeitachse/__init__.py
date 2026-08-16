@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import inspect
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
@@ -45,7 +45,9 @@ async def _maybe_await(value: Any) -> None:
 class TrackingManager:
     """Manage periodic snapshot collection."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, storage: EncryptedSnapshotStorage) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, storage: EncryptedSnapshotStorage
+    ) -> None:
         """Initialize tracker."""
         self._hass = hass
         self._entry = entry
@@ -71,7 +73,9 @@ class TrackingManager:
         for person_entity_id in tracked_persons:
             state = self._hass.states.get(person_entity_id)
             if state is None:
-                _LOGGER.debug("Skipping snapshot for %s: state not found", person_entity_id)
+                _LOGGER.debug(
+                    "Skipping snapshot for %s: state not found", person_entity_id
+                )
                 continue
             latitude = state.attributes.get("latitude")
             longitude = state.attributes.get("longitude")
@@ -96,7 +100,7 @@ class TrackingManager:
                     person_entity_id,
                     state.state,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 failed_count += 1
                 _LOGGER.exception("Failed to store snapshot for %s", person_entity_id)
 
@@ -164,12 +168,13 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
 def _schedule_panel_registration(hass: HomeAssistant) -> None:
     """Register now, retry at startup, then retry once again after a short delay."""
+
     async def _async_try_register_panel(context: str) -> None:
         if hass.data[DOMAIN].get("panel_registered"):
             return
         try:
             await _async_register_panel(hass)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.exception(
                 "Failed to register Zeitachse sidebar panel (%s)",
                 context,

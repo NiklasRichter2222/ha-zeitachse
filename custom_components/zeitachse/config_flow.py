@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from cryptography.fernet import Fernet
 import voluptuous as vol
-
+from cryptography.fernet import Fernet
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.helpers import selector
@@ -65,9 +64,15 @@ def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
     tracked_persons = options.get(CONF_TRACKED_PERSONS, [])
     interval_minutes = options.get(CONF_INTERVAL_MINUTES, DEFAULT_INTERVAL_MINUTES)
     enable_dashboard = options.get(CONF_ENABLE_DASHBOARD, DEFAULT_ENABLE_DASHBOARD)
-    person_colors = _normalize_person_colors(tracked_persons, options.get(CONF_PERSON_COLORS))
-    stay_min_snapshots = options.get(CONF_STAY_MIN_SNAPSHOTS, DEFAULT_STAY_MIN_SNAPSHOTS)
-    stay_distance_meters = options.get(CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS)
+    person_colors = _normalize_person_colors(
+        tracked_persons, options.get(CONF_PERSON_COLORS)
+    )
+    stay_min_snapshots = options.get(
+        CONF_STAY_MIN_SNAPSHOTS, DEFAULT_STAY_MIN_SNAPSHOTS
+    )
+    stay_distance_meters = options.get(
+        CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS
+    )
 
     return vol.Schema(
         {
@@ -192,7 +197,9 @@ class ZeitachseOptionsFlow(config_entries.OptionsFlow):
                         user_input.get(CONF_PERSON_COLORS),
                     ),
                     CONF_STAY_MIN_SNAPSHOTS: int(user_input[CONF_STAY_MIN_SNAPSHOTS]),
-                    CONF_STAY_DISTANCE_METERS: int(user_input[CONF_STAY_DISTANCE_METERS]),
+                    CONF_STAY_DISTANCE_METERS: int(
+                        user_input[CONF_STAY_DISTANCE_METERS]
+                    ),
                 },
             )
 

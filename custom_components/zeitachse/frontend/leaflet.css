@@ -1,5 +1,3 @@
-/* Complete Leaflet CSS for Shadow DOM encapsulation */
-export const LEAFLET_SHADOW_CSS = `
 /* required styles */
 
 .leaflet-pane,
@@ -663,17 +661,3 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	}
 
 
-
-
-  .leaflet-container .leaflet-overlay-pane svg { max-width: none !important; max-height: none !important; }
-  .leaflet-pane { z-index: 400; }
-  .leaflet-tile-pane { z-index: 200; }
-  .leaflet-overlay-pane { z-index: 400; }
-  .leaflet-shadow-pane { z-index: 500; }
-  .leaflet-marker-pane { z-index: 600; }
-  .leaflet-tooltip-pane { z-index: 650; }
-  .leaflet-popup-pane { z-index: 700; }
-  .leaflet-map-pane canvas { z-index: 100; }
-  .leaflet-map-pane svg { z-index: 200; }
-
-`;

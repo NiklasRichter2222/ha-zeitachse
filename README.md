@@ -1,116 +1,141 @@
-# ha-zeitachse
+# ha-zeitachse ⏱️📍
 
-HACS-kompatible Home-Assistant-Integration für eine einfache Zeitachse ähnlich zu Google Timeline.
+HACS-kompatible Home-Assistant-Integration für eine verschlüsselte Zeitachse und Standort-Historie (ähnlich wie Google Timeline).
 
-## Features
+---
 
-- Config Flow zur Einrichtung in Home Assistant
-- Kein automatisches Tracking ohne explizit ausgewählte Personen
-- Admin-konfigurierbare Liste von `person`-Entitäten für das Tracking
-- Einstellbares Snapshot-Intervall (in Minuten)
-- Positionsdaten werden verschlüsselt in `.storage/zeitachse_snapshots.enc` gespeichert
-- Optionales Sidebar-Dashboard mit Karte und ein-/ausblendbarer Zeitachse pro Person
-- Lovelace-Karten:
-  - `zeitachse-map-card` (nur Karte)
-  - `zeitachse-timeline-card` (nur Timeline)
-- Zeitraum-Filter (`1h`, `1d`, `1w`, `1m`, `1j`) sowie Aufenthaltsliste inkl. POI-Namen
+## ✨ Features
 
-## Installation (HACS)
+- **Datenschutz & Verschlüsselung**: Positionsdaten werden mit Fernet symmetrisch verschlüsselt in `.storage/zeitachse_snapshots.enc` abgelegt.
+- **Kein ungefragtes Tracking**: Nur explizit im Config-Flow ausgewählte `person`-Entitäten werden aufgezeichnet.
+- **Einstellbares Intervall**: Snapshot-Takt frei wählbar (in Minuten).
+- **Sidebar-Dashboard**: Interaktive Leaflet-Karte mit Zeitachsen-Filter (`1h`, `1d`, `1w`, `1m`, `1j`), animiertem Routenverlauf und Aufenthaltsliste.
+- **POI & Zonen-Erkennung**: Automatische Erkennung von Home-Assistant-Zonen und OpenStreetMap/Nominatim POIs (mit Caching und Rate-Limiting).
+- **Lovelace-Karten**:
+  - `zeitachse-map-card` (Kartenansicht mit Filtern und Zoom)
+  - `zeitachse-timeline-card` (vertikale Chronik für eine Person)
+- **Vollständige Testabdeckung**: Automatisierte Pytest-Testsuite und Ruff-Linter integriert.
 
-1. Repository in HACS als benutzerdefiniertes Repository hinzufügen (Kategorie: Integration).
-2. Integration **Zeitachse** installieren.
+---
+
+## 🚀 Schnellstart: Lokal starten & ausprobieren
+
+Das Repository ist so vorbereitet, dass du Home Assistant und die Integration sofort lokal ohne externe Abhängigkeiten starten und testen kannst.
+
+### 1. Home Assistant lokal starten
+
+Führe einfach das Startskript im Hauptordner aus:
+
+```bash
+./scripts/run_dev.sh
+```
+
+*Alternativ manuell:*
+```bash
+source .venv/bin/activate
+hass -c .
+```
+
+Home Assistant startet und ist unter **[http://localhost:8123](http://localhost:8123)** erreichbar.
+
+- **Benutzer:** `test`
+- **Passwort:** `1234`
+*(Oder erstelle beim ersten Start einen eigenen Admin-Account, falls du mit einer frischen Instanz beginnst).*
+
+### 2. Testdaten einspielen (GPS-Punkte generieren)
+
+Damit du die Zeitachse und die Karte sofort mit realistischen Wegpunkten (z. B. Brandenburger Tor, Reichstag, Alexanderplatz) testen kannst, führe das Seed-Skript aus:
+
+```bash
+source .venv/bin/activate
+python scripts/seed_sample_data.py
+```
+
+Lade anschließend die Seite im Browser neu (**Strg+Shift+R** oder **Cmd+Shift+R**) und klicke in der Seitenleiste auf **Zeitachse**.
+
+---
+
+## 🧪 Tests & Code-Qualität ausführen
+
+Die Integration verfügt über eine umfassende Testsuite mit 32 Unit-Tests für Storage, POI-Lookup, Config Flow, Tracking und WebSocket APIs.
+
+### Alle Tests & Linter mit einem Befehl:
+
+```bash
+./scripts/run_tests.sh
+```
+
+### Manuelle Test-Befehle:
+
+```bash
+source .venv/bin/activate
+
+# 1. Pytest Unit-Tests ausführen
+pytest
+
+# 2. Pytest mit ausführlicher Ausgabe
+pytest -v
+
+# 3. Linter & Code-Formatierung prüfen
+ruff check .
+
+# 4. Automatische Linter-Korrekturen
+ruff check --fix .
+```
+
+---
+
+## 📁 Projektstruktur
+
+```text
+ha-zeitachse/
+├── custom_components/
+│   └── zeitachse/
+│       ├── __init__.py           # Integration Lifecycle & TrackingManager
+│       ├── config_flow.py        # UI Setup Flow & Optionen
+│       ├── const.py              # Konstanten, Limits & Farbpaletten
+│       ├── manifest.json         # HA Integration Manifest & HACS Info
+│       ├── poi_lookup.py         # HA Zonen & OpenStreetMap Nominatim Resolver
+│       ├── storage.py            # Fernet-verschlüsselter Speicher & Benutzereinstellungen
+│       ├── websocket_api.py      # WebSocket Endpunkte für Frontend & Karten
+│       └── frontend/
+│           ├── zeitachse-panel.js    # Sidebar Panel WebComponent
+│           ├── zeitachse-card.js     # Lovelace Map & Timeline Cards
+│           ├── leaflet-shadow-css.js # Leaflet CSS Injection Helper
+│           └── map-utils.js          # Geometrie & Zeit-Hilfsfunktionen
+├── tests/
+│   ├── test_config_flow.py       # Tests für Config & Options Flow
+│   ├── test_init.py              # Tests für Setup, Unload & TrackingManager
+│   ├── test_poi_lookup.py        # Tests für Zonen, Caching & OSM POI
+│   ├── test_storage.py           # Tests für Verschlüsselung & Pruning
+│   └── test_websocket_api.py     # Tests für WebSocket Handler
+├── scripts/
+│   ├── run_dev.sh                # Startet Home Assistant lokal
+│   ├── run_tests.sh              # Führt Compileall, Ruff & Pytest aus
+│   └── seed_sample_data.py       # Erstellt verschlüsselte GPS-Demodaten
+├── configuration.yaml            # Lokale Home Assistant Dev-Konfiguration
+└── requirements.txt              # Entwicklungs- & Test-Abhängigkeiten
+```
+
+---
+
+## ⚙️ Wie die Integration funktioniert
+
+1. **Tracking**: Der `TrackingManager` fragt im eingestellten Intervall (z. B. alle 5 Minuten) die Koordinaten (`latitude`, `longitude`) der konfigurierten `person`-Entitäten ab.
+2. **Verschlüsselung**: Jeder Snapshot wird mit einem integrationsspezifischen Fernet-Schlüssel verschlüsselt in `.storage/zeitachse_snapshots.enc` gespeichert.
+3. **Aufenthalts-Erkennung**: Zusammenhängende Snapshots innerhalb eines Radius (Standard: 75m) werden automatisch zu Aufenthalten gruppiert.
+4. **POI-Lookup**: Für Standorte wird zuerst geprüft, ob eine Home-Assistant-`zone` zutrifft; andernfalls wird OpenStreetMap Nominatim abgefragt (mit integriertem Cache und 1s Rate-Limit).
+5. **Visualisierung**: Das Sidebar-Panel und die Lovelace-Karten laden die Punkte über sichere WebSocket-Befehle (`zeitachse/get_timeline`, `zeitachse/list_people`).
+
+---
+
+## 📦 Installation in Produktiv-Systemen (HACS)
+
+1. In HACS als benutzerdefiniertes Repository hinzufügen:
+   - URL: `https://github.com/NiklasRichter2222/ha-zeitachse`
+   - Kategorie: `Integration`
+2. Integration **Zeitachse** herunterladen.
 3. Home Assistant neu starten.
 4. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** nach **Zeitachse** suchen.
-5. Browser einmal hart neu laden (Strg/Cmd+Shift+R), damit Frontend-Dateien neu geladen werden.
-
-## Entwicklung in VS Code (Schritt für Schritt)
-
-Diese Schritte sind für lokale Weiterentwicklung gedacht (ohne HACS-Paketbau).
-
-### 1) Voraussetzungen installieren
-
-- Git
-- Python 3.12 (oder die Version deiner Home-Assistant-Instanz)
-- Visual Studio Code
-- VS-Code-Erweiterungen:
-  - Python (ms-python.python)
-  - Pylance (ms-python.vscode-pylance)
-  - EditorConfig (optional)
-
-### 2) Repository klonen und in VS Code öffnen
-
-```bash
-git clone https://github.com/NiklasRichter2222/ha-zeitachse.git
-cd ha-zeitachse
-code .
-```
-
-### 3) Python-Umgebung für lokale Checks anlegen
-
-Im Projektordner:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-```
-
-`requirements.txt` ist aktuell **nicht nötig**, weil Laufzeit-Abhängigkeiten der Integration über `custom_components/zeitachse/manifest.json` verwaltet werden (z. B. `cryptography>=42.0.0`).
-
-### 4) Home-Assistant-Testumgebung vorbereiten
-
-1. Erstelle ein separates Home-Assistant-Config-Verzeichnis, z. B. `~/ha-dev-config`.
-2. Kopiere den Ordner `custom_components/zeitachse` aus diesem Repository nach `~/ha-dev-config/custom_components/zeitachse`.
-3. Lege (falls noch nicht vorhanden) `~/ha-dev-config/configuration.yaml` an.
-
-Minimalbeispiel:
-
-```yaml
-default_config:
-```
-
-Wichtig: Für **Zeitachse** ist keine YAML-Konfiguration nötig; die Einrichtung läuft über den UI-Config-Flow.
-
-Optionales `person`-Beispiel (falls du noch keine `person.*`-Entitäten hast):
-
-```yaml
-person:
-  - name: Max
-    id: max
-    device_trackers:
-      - device_tracker.max_phone
-```
-
-### 5) Home Assistant mit deiner Dev-Config starten
-
-Starte Home Assistant mit diesem Config-Ordner (Container/Core je nach Setup). Danach:
-
-1. **Einstellungen → Geräte & Dienste → Integration hinzufügen → Zeitachse**
-2. Zu trackende `person.*`-Entitäten auswählen
-3. Intervall und weitere Optionen setzen
-
-### 6) Frontend-Änderungen testen
-
-- Nach Änderungen an `custom_components/zeitachse/frontend/*.js`:
-  1. Home Assistant neu starten
-  2. Browser hart neu laden (Strg/Cmd+Shift+R)
-
-### 7) Schnelle lokale Validierung vor Commits
-
-Im Repo:
-
-```bash
-python -m compileall custom_components/zeitachse
-```
-
-## Konfiguration & Nutzung
-
-- Bei aktivierter Option **Dashboard in der Seitenleiste** erscheint links der Eintrag **Zeitachse**.
-- `zeitachse-timeline-card` zeigt genau eine Person (`person`) und unterstützt `height_rows`.
-- `zeitachse-map-card` unterstützt `people`, `range`, `center`, `zoom`, `interactive`.
-- Aufenthaltsregeln werden in den Integrations-Optionen gesetzt:
-  - Mindestanzahl an Snapshots für „verweilend“
-  - Erlaubte Positionsabweichung in Metern
-- Option **„gespeicherte Zeitachsen-Daten ersetzen“** löscht beim Speichern bestehende Verlaufspunkte.
-
-Ohne ausgewählte Personen wird niemand getrackt.
+5. Gewünschte Personen und Optionen auswählen.
+6. Browser mit **Strg+Shift+R** (Hard Refresh) neu laden.

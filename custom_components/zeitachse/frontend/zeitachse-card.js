@@ -1,5 +1,5 @@
 import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
-import { haversineMeters, toPoint, toTimestamp } from "./map-utils.js";
+import { ensureLeafletLoaded, haversineMeters, simplifyPoints, toPoint, toTimestamp } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
@@ -226,11 +226,11 @@ class ZeitachseBaseCard extends HTMLElement {
     return stays.sort((a, b) => b.start.getTime() - a.start.getTime());
   }
 
-  async _refreshStaysAndPoi() {
+  _refreshStaysAndPoi() {
     const stays = this._collectStays();
     this.stays = stays;
-    await this._loadPoiForStays(stays);
     this._renderData();
+    this._loadPoiForStays(stays);
   }
 
   async _loadPoiForStays(stays) {
@@ -241,24 +241,26 @@ class ZeitachseBaseCard extends HTMLElement {
       if (!key || this.poiByPoint.has(key) || missing.has(key)) continue;
       missing.set(key, stay.point);
     }
-    await Promise.all(
-      [...missing.entries()].map(async ([key, point]) => {
-        try {
-          const [latitude, longitude] = point;
-          const result = await this._hass.callWS({
-            type: "zeitachse/get_poi",
-            latitude,
-            longitude,
-          });
-          if (version !== this._poiLookupVersion) return;
-          this.poiByPoint.set(key, result?.poi || null);
-        } catch (_error) {
-          if (version !== this._poiLookupVersion) return;
-          this.poiByPoint.set(key, null);
-          console.debug("[zeitachse-card] POI lookup failed", _error);
-        }
-      })
-    );
+    if (missing.size === 0) return;
+
+    for (const [key, point] of missing.entries()) {
+      if (version !== this._poiLookupVersion) return;
+      try {
+        const [latitude, longitude] = point;
+        const result = await this._hass.callWS({
+          type: "zeitachse/get_poi",
+          latitude,
+          longitude,
+        });
+        if (version !== this._poiLookupVersion) return;
+        this.poiByPoint.set(key, result?.poi || null);
+        this._renderData();
+      } catch (_error) {
+        if (version !== this._poiLookupVersion) return;
+        this.poiByPoint.set(key, null);
+        console.debug("[zeitachse-card] POI lookup failed", _error);
+      }
+    }
   }
 
   _formatDuration(durationMs) {
@@ -337,13 +339,13 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
   }
 
   async _waitForLeaflet() {
-    for (let attempt = 1; attempt <= LEAFLET_WAIT_MAX_ATTEMPTS; attempt += 1) {
-      if (window.L) return true;
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, LEAFLET_WAIT_DELAY_MS);
-      });
+    try {
+      const L = await ensureLeafletLoaded();
+      return !!L;
+    } catch (error) {
+      console.error("[zeitachse-card] Failed to load Leaflet:", error);
+      return false;
     }
-    return false;
   }
 
   _initMap() {
@@ -352,6 +354,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
     if (!mapElement) return false;
     try {
       this.map = window.L.map(mapElement, {
+        preferCanvas: true,
         dragging: this._interactive,
         scrollWheelZoom: this._interactive,
         doubleClickZoom: this._interactive,
@@ -427,29 +430,41 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       if (!points.length) continue;
 
       hasData = true;
-      const polyline = window.L.polyline(points, { color: person.color, weight: 4 }).addTo(this.map);
+      const simplified = simplifyPoints(points, 3);
+      const polyline = window.L.polyline(simplified, {
+        color: person.color,
+        weight: 4,
+        renderer: window.L.canvas({ padding: 0.5 }),
+      }).addTo(this.map);
       this.layers.push(polyline);
       const lastPoint = points[points.length - 1];
-      const marker = window.L.circleMarker(lastPoint, { color: person.color, radius: 7 }).addTo(this.map);
+      const marker = window.L.circleMarker(lastPoint, {
+        color: person.color,
+        radius: 7,
+        renderer: window.L.canvas({ padding: 0.5 }),
+      }).addTo(this.map);
       marker.bindPopup(`${person.name} (${points.length} Punkte)`);
       this.layers.push(marker);
     }
 
     for (const stay of this.stays) {
-      const poi = this.poiByPoint.get(pointKey(stay.point)) || null;
+      const key = pointKey(stay.point);
+      const poi = this.poiByPoint.get(key) || null;
       const stayMarker = window.L.circleMarker(stay.point, {
         radius: 8,
         color: "#f57c00",
         fillColor: "#ff9800",
         fillOpacity: 0.9,
         weight: 2,
+        renderer: window.L.canvas({ padding: 0.5 }),
       }).addTo(this.map);
-      const poiLabel = poi?.name ? escapeHtml(poi.name) : "Namenloser Pin";
-      const poiLink = poi?.url
+      stayMarker._pointKey = key;
+      const poiLabel = poi?.name ? escapeHtml(poi.name) : "Aufenthalt";
+      const detailsLink = poi?.url
         ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos</a>`
         : "";
       stayMarker.bindPopup(
-        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${poiLink}`
+        `<strong>${escapeHtml(stay.person.name)}</strong><br>${poiLabel}<br>${this._formatDuration(stay.durationMs)}${detailsLink}`
       );
       if (poi?.name) {
         stayMarker.bindTooltip(escapeHtml(poi.name), {
