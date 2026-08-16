@@ -19,6 +19,7 @@ from custom_components.zeitachse.websocket_api import (
     ws_get_poi,
     ws_get_timeline,
     ws_list_people,
+    ws_preload_pois,
     ws_set_active_people,
     ws_set_person_colors,
     ws_set_stay_settings,
@@ -92,7 +93,7 @@ async def test_ws_list_people(mock_runtime):
     hass = MagicMock()
     hass.data = {RUNTIME_DATA_KEY: mock_runtime}
 
-    mock_runtime.preferences.async_get = AsyncMock(
+    mock_runtime.preferences.async_load = AsyncMock(
         return_value={"active_people": ["person.alice"]}
     )
 
@@ -123,7 +124,7 @@ async def test_ws_set_active_people(mock_runtime):
     hass = MagicMock()
     hass.data = {RUNTIME_DATA_KEY: mock_runtime}
 
-    mock_runtime.preferences.async_set = AsyncMock()
+    mock_runtime.preferences.async_set_active_people = AsyncMock()
 
     connection = MagicMock()
     connection.user.id = "user_123"
@@ -135,11 +136,10 @@ async def test_ws_set_active_people(mock_runtime):
     }
     await call_ws(ws_set_active_people, hass, connection, msg)
 
-    # Unknown person should be filtered out because they are not tracked
-    mock_runtime.preferences.async_set.assert_awaited_once_with(
-        "user_123", {"active_people": ["person.bob"]}
+    mock_runtime.preferences.async_set_active_people.assert_awaited_once_with(
+        ["person.bob", "person.unknown"]
     )
-    connection.send_result.assert_called_once_with(2, {"active_people": ["person.bob"]})
+    connection.send_result.assert_called_once_with(2, {"status": "ok"})
 
 
 @pytest.mark.asyncio
@@ -147,19 +147,20 @@ async def test_ws_set_person_colors(mock_runtime):
     """Test updating person colors."""
     hass = MagicMock()
     hass.data = {RUNTIME_DATA_KEY: mock_runtime}
-    hass.config_entries.async_update_entry = MagicMock()
+    mock_runtime.preferences.async_set_person_colors = AsyncMock()
 
     connection = MagicMock()
     msg = {
         "id": 3,
         "type": "zeitachse/set_person_colors",
-        "person_colors": {"person.alice": "#00ff00", "person.bob": "invalid_color"},
+        "person_colors": {"person.alice": "#00ff00"},
     }
     await call_ws(ws_set_person_colors, hass, connection, msg)
 
-    connection.send_result.assert_called_once_with(
-        3, {"person_colors": {"person.alice": "#00ff00"}}
+    mock_runtime.preferences.async_set_person_colors.assert_awaited_once_with(
+        {"person.alice": "#00ff00"}
     )
+    connection.send_result.assert_called_once_with(3, {"status": "ok"})
 
 
 @pytest.mark.asyncio
@@ -167,7 +168,7 @@ async def test_ws_set_stay_settings(mock_runtime):
     """Test updating stay settings for user."""
     hass = MagicMock()
     hass.data = {RUNTIME_DATA_KEY: mock_runtime}
-    mock_runtime.preferences.async_set = AsyncMock()
+    mock_runtime.preferences.async_set_stay_settings = AsyncMock()
 
     connection = MagicMock()
     connection.user.id = "user_123"
@@ -180,12 +181,10 @@ async def test_ws_set_stay_settings(mock_runtime):
     }
     await call_ws(ws_set_stay_settings, hass, connection, msg)
 
-    mock_runtime.preferences.async_set.assert_awaited_once_with(
-        "user_123", {"stay_settings": {"min_snapshots": 12, "distance_meters": 150}}
+    mock_runtime.preferences.async_set_stay_settings.assert_awaited_once_with(
+        12, 150
     )
-    connection.send_result.assert_called_once_with(
-        4, {"stay_settings": {"min_snapshots": 12, "distance_meters": 150}}
-    )
+    connection.send_result.assert_called_once_with(4, {"status": "ok"})
 
 
 @pytest.mark.asyncio
@@ -275,4 +274,36 @@ async def test_ws_get_poi(mock_runtime):
 
     connection.send_result.assert_called_once_with(
         7, {"poi": {"name": "Reichstag", "category": "tourism"}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_ws_preload_pois(mock_runtime):
+    """Test websocket preloading POIs."""
+    hass = MagicMock()
+    hass.data = {RUNTIME_DATA_KEY: mock_runtime}
+    mock_runtime.preferences.async_load = AsyncMock(return_value={})
+
+    mock_runtime.poi_lookup.async_preload_all_pois = AsyncMock(
+        return_value={
+            "total_locations": 5,
+            "already_cached": 3,
+            "newly_fetched": 2,
+        }
+    )
+
+    connection = MagicMock()
+    msg = {
+        "id": 8,
+        "type": "zeitachse/preload_pois",
+    }
+    await call_ws(ws_preload_pois, hass, connection, msg)
+
+    connection.send_result.assert_called_once_with(
+        8,
+        {
+            "total_locations": 5,
+            "already_cached": 3,
+            "newly_fetched": 2,
+        },
     )

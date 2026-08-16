@@ -182,3 +182,41 @@ async def test_poi_caching(mock_hass):
 
         assert poi1 == poi2
         assert mock_session.get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_preload_all_pois(mock_hass):
+    """Test preloading POIs from snapshot storage."""
+    with patch(
+        "custom_components.zeitachse.poi_lookup.async_get_clientsession"
+    ) as mock_get_session:
+        mock_session = MagicMock()
+        mock_get_session.return_value = mock_session
+        service = PoiLookupService(mock_hass)
+
+        mock_storage = MagicMock()
+        # 6 consecutive snapshots at same location -> 1 stay
+        mock_storage.async_load = AsyncMock(
+            return_value={
+                "person.alice": [
+                    {"latitude": 52.5200, "longitude": 13.4050}
+                    for _ in range(6)
+                ]
+            }
+        )
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={"name": "Berlin Central"})
+        mock_session.get = AsyncMock(return_value=mock_response)
+
+        res = await service.async_preload_all_pois(mock_storage, 6, 75)
+        assert res["total_locations"] == 1
+        assert res["newly_fetched"] == 1
+        assert res["already_cached"] == 0
+
+        # Second run: should be already cached
+        res2 = await service.async_preload_all_pois(mock_storage, 6, 75)
+        assert res2["total_locations"] == 1
+        assert res2["newly_fetched"] == 0
+        assert res2["already_cached"] == 1

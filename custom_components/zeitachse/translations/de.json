@@ -33,6 +33,7 @@
           "person_colors": "Personenfarben (JSON: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Aufenthalts-Erkennung: Mindestanzahl Snapshots",
           "stay_distance_meters": "Aufenthalts-Erkennung: Abweichung (Meter)",
+          "preload_pois": "Alle POI-Namen & Adressen jetzt im Hintergrund vorladen",
           "replace_tracking_data": "Beim Speichern alle gespeicherten Zeitachsen-Daten ersetzen"
         }
       }

@@ -17,6 +17,7 @@ from .const import (
     CONF_ENCRYPTION_KEY,
     CONF_INTERVAL_MINUTES,
     CONF_PERSON_COLORS,
+    CONF_PRELOAD_POIS,
     CONF_REPLACE_TRACKING_DATA,
     CONF_STAY_DISTANCE_METERS,
     CONF_STAY_MIN_SNAPSHOTS,
@@ -32,6 +33,7 @@ from .const import (
     MIN_STAY_MIN_SNAPSHOTS,
     SNAPSHOT_STORAGE_FILE,
 )
+from .poi_lookup import PoiLookupService
 from .storage import EncryptedSnapshotStorage
 
 
@@ -59,7 +61,7 @@ def _normalize_person_colors(tracked_persons: list[str], raw: Any) -> dict[str, 
     }
 
 
-def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
+def _build_schema(options: Mapping[str, Any], is_options_flow: bool = False) -> vol.Schema:
     """Build schema for config and options flows."""
     tracked_persons = options.get(CONF_TRACKED_PERSONS, [])
     interval_minutes = options.get(CONF_INTERVAL_MINUTES, DEFAULT_INTERVAL_MINUTES)
@@ -74,9 +76,12 @@ def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
         CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS
     )
 
-    return vol.Schema(
+    schema_dict: dict[Any, Any] = {}
+    if not is_options_flow:
+        schema_dict[vol.Optional(CONF_NAME, default=DOMAIN)] = selector.TextSelector()
+
+    schema_dict.update(
         {
-            vol.Optional(CONF_NAME, default=DOMAIN): selector.TextSelector(),
             vol.Optional(
                 CONF_TRACKED_PERSONS,
                 default=tracked_persons,
@@ -123,12 +128,25 @@ def _build_schema(options: Mapping[str, Any]) -> vol.Schema:
                     step=1,
                 )
             ),
-            vol.Optional(
-                CONF_REPLACE_TRACKING_DATA,
-                default=False,
-            ): selector.BooleanSelector(),
         }
     )
+
+    if is_options_flow:
+        schema_dict[
+            vol.Optional(
+                CONF_PRELOAD_POIS,
+                default=False,
+            )
+        ] = selector.BooleanSelector()
+
+    schema_dict[
+        vol.Optional(
+            CONF_REPLACE_TRACKING_DATA,
+            default=False,
+        )
+    ] = selector.BooleanSelector()
+
+    return vol.Schema(schema_dict)
 
 
 class ZeitachseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -158,7 +176,7 @@ class ZeitachseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
             return self.async_create_entry(title=user_input[CONF_NAME], data=data)
 
-        return self.async_show_form(step_id="user", data_schema=_build_schema({}))
+        return self.async_show_form(step_id="user", data_schema=_build_schema({}, is_options_flow=False))
 
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
@@ -186,6 +204,23 @@ class ZeitachseOptionsFlow(config_entries.OptionsFlow):
                     self._config_entry.data[CONF_ENCRYPTION_KEY],
                 )
                 await storage.async_replace({})
+
+            min_snapshots = int(user_input[CONF_STAY_MIN_SNAPSHOTS])
+            distance_meters = int(user_input[CONF_STAY_DISTANCE_METERS])
+
+            if user_input.get(CONF_PRELOAD_POIS):
+                storage = EncryptedSnapshotStorage(
+                    self.hass,
+                    SNAPSHOT_STORAGE_FILE,
+                    self._config_entry.data[CONF_ENCRYPTION_KEY],
+                )
+                poi_lookup = PoiLookupService(self.hass)
+                self.hass.async_create_task(
+                    poi_lookup.async_preload_all_pois(
+                        storage, min_snapshots, distance_meters
+                    )
+                )
+
             return self.async_create_entry(
                 title="",
                 data={
@@ -196,11 +231,9 @@ class ZeitachseOptionsFlow(config_entries.OptionsFlow):
                         tracked_persons,
                         user_input.get(CONF_PERSON_COLORS),
                     ),
-                    CONF_STAY_MIN_SNAPSHOTS: int(user_input[CONF_STAY_MIN_SNAPSHOTS]),
-                    CONF_STAY_DISTANCE_METERS: int(
-                        user_input[CONF_STAY_DISTANCE_METERS]
-                    ),
+                    CONF_STAY_MIN_SNAPSHOTS: min_snapshots,
+                    CONF_STAY_DISTANCE_METERS: distance_meters,
                 },
             )
 
-        return self.async_show_form(step_id="init", data_schema=_build_schema(merged))
+        return self.async_show_form(step_id="init", data_schema=_build_schema(merged, is_options_flow=True))

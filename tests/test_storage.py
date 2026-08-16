@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 
-from custom_components.zeitachse.const import MAX_SNAPSHOTS_PER_PERSON
 from custom_components.zeitachse.storage import (
     EncryptedSnapshotStorage,
     UserPreferenceStorage,

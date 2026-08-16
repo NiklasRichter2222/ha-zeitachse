@@ -359,3 +359,72 @@ class PoiLookupService:
         }
         self._cache_set(key, poi)
         return poi
+
+    async def async_preload_all_pois(
+        self,
+        snapshot_storage: Any,
+        stay_min_snapshots: int = 6,
+        stay_distance_meters: int = 75,
+    ) -> dict[str, Any]:
+        """Pre-fetch and persist POIs for all stay locations across all persons."""
+        await self._async_ensure_loaded()
+        data = await snapshot_storage.async_load()
+        stay_points: set[tuple[float, float]] = set()
+
+        for snapshots in data.values():
+            if not isinstance(snapshots, list) or len(snapshots) < stay_min_snapshots:
+                continue
+
+            current_point: tuple[float, float] | None = None
+            current_samples = 0
+
+            for entry in snapshots:
+                lat = entry.get("latitude")
+                lon = entry.get("longitude")
+                if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+                    continue
+                pt = (float(lat), float(lon))
+
+                if current_point is None:
+                    current_point = pt
+                    current_samples = 1
+                    continue
+
+                if (
+                    self._haversine_meters(
+                        current_point[0], current_point[1], pt[0], pt[1]
+                    )
+                    <= stay_distance_meters
+                ):
+                    current_samples += 1
+                    continue
+
+                if current_samples >= stay_min_snapshots:
+                    stay_points.add(
+                        (round(current_point[0], 5), round(current_point[1], 5))
+                    )
+
+                current_point = pt
+                current_samples = 1
+
+            if current_point and current_samples >= stay_min_snapshots:
+                stay_points.add((round(current_point[0], 5), round(current_point[1], 5)))
+
+        total = len(stay_points)
+        already_cached = 0
+        newly_fetched = 0
+
+        for pt in stay_points:
+            key = self._cache_key(pt[0], pt[1])
+            if key in self._cache and self._cache[key] is not None:
+                already_cached += 1
+                continue
+            poi = await self.async_lookup(pt[0], pt[1])
+            if poi:
+                newly_fetched += 1
+
+        return {
+            "total_locations": total,
+            "already_cached": already_cached,
+            "newly_fetched": newly_fetched,
+        }

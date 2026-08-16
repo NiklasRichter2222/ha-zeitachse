@@ -98,6 +98,7 @@ class ZeitachsePanel extends HTMLElement {
     this._isFullMap = false;
     this._poiLookupVersion = 0;
     this._lastZoom = null;
+    this._isPreloading = false;
     this.selectedRange = "1d";
     this.staySettings = {
       min_snapshots: DEFAULT_STAY_MIN_SNAPSHOTS,
@@ -233,10 +234,6 @@ class ZeitachsePanel extends HTMLElement {
         .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
         .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
         .summary { color: var(--secondary-text-color); font-size: 0.85rem; margin-top: 6px; }
-        .stay-settings { margin-top: 10px; border-top: 1px solid var(--divider-color); padding-top: 8px; }
-        .stay-settings-title { font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
-        .stay-setting { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 4px 0; font-size: 0.85rem; }
-        .stay-setting input { width: 80px; }
         
         .stay-list-panel {
           flex: 4 1 0%;

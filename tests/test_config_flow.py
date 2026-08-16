@@ -166,3 +166,39 @@ async def test_options_flow_replace_data():
         result = await flow.async_step_init(user_input)
         assert result["type"] == "create_entry"
         mock_storage.async_replace.assert_awaited_once_with({})
+
+
+@pytest.mark.asyncio
+async def test_options_flow_preload_pois():
+    """Test triggering background POI preload from options flow."""
+    config_entry = MagicMock()
+    config_entry.data = {
+        CONF_ENCRYPTION_KEY: "WMaIMi99JUsKmIBILtrlgH0DABh6ImWSaJ0QX2RxpRg=",
+        CONF_TRACKED_PERSONS: ["person.alice"],
+    }
+    config_entry.options = {}
+
+    flow = ZeitachseOptionsFlow(config_entry)
+    flow.hass = MagicMock()
+    flow.hass.async_create_task = MagicMock()
+
+    user_input = {
+        CONF_TRACKED_PERSONS: ["person.alice"],
+        CONF_INTERVAL_MINUTES: 5,
+        CONF_ENABLE_DASHBOARD: True,
+        CONF_PERSON_COLORS: {},
+        CONF_STAY_MIN_SNAPSHOTS: 6,
+        CONF_STAY_DISTANCE_METERS: 75,
+        "preload_pois": True,
+        CONF_REPLACE_TRACKING_DATA: False,
+    }
+
+    with patch(
+        "custom_components.zeitachse.config_flow.PoiLookupService"
+    ) as mock_poi_cls:
+        mock_poi = MagicMock()
+        mock_poi_cls.return_value = mock_poi
+
+        result = await flow.async_step_init(user_input)
+        assert result["type"] == "create_entry"
+        flow.hass.async_create_task.assert_called_once()

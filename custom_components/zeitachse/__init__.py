@@ -20,9 +20,13 @@ from .const import (
     CONF_ENABLE_DASHBOARD,
     CONF_ENCRYPTION_KEY,
     CONF_INTERVAL_MINUTES,
+    CONF_STAY_DISTANCE_METERS,
+    CONF_STAY_MIN_SNAPSHOTS,
     CONF_TRACKED_PERSONS,
     DEFAULT_ENABLE_DASHBOARD,
     DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_STAY_DISTANCE_METERS,
+    DEFAULT_STAY_MIN_SNAPSHOTS,
     DOMAIN,
     RUNTIME_DATA_KEY,
     SNAPSHOT_STORAGE_FILE,
@@ -231,6 +235,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_ENABLE_DASHBOARD, DEFAULT_ENABLE_DASHBOARD),
     ):
         _schedule_panel_registration(hass)
+
+    async def _async_background_preload_pois(_: Any = None) -> None:
+        try:
+            prefs = await preferences.async_load()
+            stay_settings = prefs.get("stay_settings", {})
+            min_snapshots = stay_settings.get(
+                CONF_STAY_MIN_SNAPSHOTS,
+                entry.options.get(
+                    CONF_STAY_MIN_SNAPSHOTS,
+                    entry.data.get(CONF_STAY_MIN_SNAPSHOTS, DEFAULT_STAY_MIN_SNAPSHOTS),
+                ),
+            )
+            distance_meters = stay_settings.get(
+                CONF_STAY_DISTANCE_METERS,
+                entry.options.get(
+                    CONF_STAY_DISTANCE_METERS,
+                    entry.data.get(CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS),
+                ),
+            )
+            res = await poi_lookup.async_preload_all_pois(
+                storage, min_snapshots, distance_meters
+            )
+            _LOGGER.debug("Background POI preload completed: %s", res)
+        except Exception:
+            _LOGGER.debug("Background POI preload encountered an error", exc_info=True)
+
+    if hass.is_running:
+        async_call_later(hass, 3, _async_background_preload_pois)
+    else:
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED, _async_background_preload_pois
+        )
 
     hass.data[DOMAIN][entry.entry_id] = {
         "tracker": tracker,
