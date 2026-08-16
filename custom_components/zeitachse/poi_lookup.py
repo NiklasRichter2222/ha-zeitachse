@@ -199,27 +199,37 @@ class PoiLookupService:
     ) -> dict[str, Any] | None:
         """Resolve a matching Home Assistant zone for coordinates."""
         best_match: tuple[float, dict[str, Any]] | None = None
+
+        # 1. Iterate all zone states
         for state in self._hass.states.async_all("zone"):
             zone_lat = state.attributes.get("latitude")
             zone_lon = state.attributes.get("longitude")
-            zone_radius = state.attributes.get("radius", 0)
+            zone_radius = state.attributes.get("radius")
+
             if not isinstance(zone_lat, (int, float)) or not isinstance(
                 zone_lon, (int, float)
             ):
                 continue
+
             if not isinstance(zone_radius, (int, float)) or zone_radius <= 0:
-                continue
+                zone_radius = getattr(self._hass.config, "radius", 100) or 100
+
             distance = self._haversine_meters(
                 latitude, longitude, float(zone_lat), float(zone_lon)
             )
             if distance > float(zone_radius):
                 continue
+
             zone_name_raw = (
                 state.attributes.get(ATTR_FRIENDLY_NAME)
                 or state.name
-                or state.entity_id.removeprefix("zone.")
+                or (
+                    "Zuhause"
+                    if state.entity_id == "zone.home"
+                    else state.entity_id.removeprefix("zone.")
+                )
             )
-            zone_name = str(zone_name_raw).strip() or "Unknown Zone"
+            zone_name = str(zone_name_raw).strip() or "Zuhause"
             zone = {
                 "name": zone_name,
                 "display_name": zone_name,
@@ -229,6 +239,29 @@ class PoiLookupService:
             }
             if best_match is None or distance < best_match[0]:
                 best_match = (distance, zone)
+
+        # 2. Check hass.config Home coordinates as direct fallback
+        if best_match is None and (
+            isinstance(getattr(self._hass.config, "latitude", None), (int, float))
+            and isinstance(getattr(self._hass.config, "longitude", None), (int, float))
+        ):
+            home_lat = float(self._hass.config.latitude)
+            home_lon = float(self._hass.config.longitude)
+            home_radius = float(getattr(self._hass.config, "radius", 100) or 100)
+            home_dist = self._haversine_meters(latitude, longitude, home_lat, home_lon)
+            if home_dist <= home_radius:
+                home_name = (
+                    getattr(self._hass.config, "location_name", None)
+                    or "Zuhause"
+                )
+                return {
+                    "name": home_name,
+                    "display_name": home_name,
+                    "category": "zone",
+                    "type": "home_assistant_zone",
+                    "url": None,
+                }
+
         return best_match[1] if best_match else None
 
     async def async_lookup(

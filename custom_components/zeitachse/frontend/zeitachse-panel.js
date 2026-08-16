@@ -11,6 +11,13 @@ const RANGE_LABELS = {
   "1m": "1m",
   "1y": "1j",
 };
+const RANGE_TOLERANCE_METERS = {
+  "1h": 2,
+  "1d": 3,
+  "1w": 6,
+  "1m": 12,
+  "1y": 25,
+};
 const DEFAULT_STAY_DISTANCE_METERS = 75;
 const DEFAULT_STAY_MIN_SNAPSHOTS = 6;
 const MIN_STAY_DISTANCE_METERS = 5;
@@ -90,35 +97,11 @@ class ZeitachsePanel extends HTMLElement {
           gap: 8px;
           background: var(--primary-background-color, #111111);
         }
-        .top-bar {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 0 4px;
-          flex-shrink: 0;
-          min-height: 32px;
-        }
         .status {
           color: var(--secondary-text-color, #999999);
-          font-size: 0.9rem;
-        }
-        .view-toggle-btn {
-          background: var(--card-background-color, #1e1e1e);
-          color: var(--primary-text-color, #ffffff);
-          border: 1px solid var(--divider-color, rgba(255,255,255,0.15));
-          border-radius: 8px;
-          padding: 5px 12px;
           font-size: 0.85rem;
-          font-weight: 500;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.2s ease;
-        }
-        .view-toggle-btn:hover {
-          background: color-mix(in srgb, var(--primary-color, #03a9f4) 15%, var(--card-background-color, #1e1e1e));
-          border-color: var(--primary-color, #03a9f4);
+          padding: 2px 6px;
+          flex-shrink: 0;
         }
         .main-split {
           flex: 1;
@@ -164,15 +147,43 @@ class ZeitachsePanel extends HTMLElement {
           box-sizing: border-box;
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
-          background: color-mix(in srgb, var(--card-background-color, #1f1f1f) 80%, transparent);
+          background: color-mix(in srgb, var(--card-background-color, #1f1f1f) 82%, transparent);
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+        }
+        .fullscreen-fab {
+          position: absolute;
+          bottom: 20px;
+          right: 20px;
+          z-index: 1000;
+          width: 42px;
+          height: 42px;
+          border-radius: 8px;
+          background: var(--card-background-color, #1e1e1e);
+          color: var(--primary-text-color, #ffffff);
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.25));
+          box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          transition: transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease;
+        }
+        .fullscreen-fab:hover {
+          background: color-mix(in srgb, var(--primary-color, #03a9f4) 25%, var(--card-background-color, #1e1e1e));
+          border-color: var(--primary-color, #03a9f4);
+          transform: scale(1.05);
+        }
+        .fullscreen-fab:active {
+          transform: scale(0.95);
         }
         .range-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
         .range-btn { border: 1px solid var(--divider-color); background: transparent; color: inherit; border-radius: 14px; padding: 4px 10px; cursor: pointer; }
         .range-btn.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 600; }
         .person { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
         .person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
         .color-picker { width: 32px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer; }
         .summary { color: var(--secondary-text-color); font-size: 0.85rem; margin-top: 6px; }
         .stay-settings { margin-top: 10px; border-top: 1px solid var(--divider-color); padding-top: 8px; }
@@ -195,34 +206,46 @@ class ZeitachsePanel extends HTMLElement {
           display: none;
         }
         .stay-title { font-weight: 600; font-size: 1rem; margin-bottom: 10px; color: var(--primary-text-color, #ffffff); }
-        .stay-group {
-          border: 1px solid var(--divider-color, rgba(255,255,255,0.08));
-          border-radius: 8px;
-          margin-bottom: 8px;
-          padding: 8px 10px;
-          background: rgba(255, 255, 255, 0.02);
+        .stay-item {
+          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
+          padding: 8px 0;
         }
-        .stay-group-header {
+        .stay-item:first-of-type {
+          border-top: none;
+          padding-top: 0;
+        }
+        .stay-item-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           gap: 8px;
         }
-        .stay-group-title { font-weight: 600; font-size: 0.95rem; color: var(--primary-text-color, #ffffff); }
-        .stay-group-badge {
+        .stay-item-title {
+          font-weight: 600;
+          font-size: 0.95rem;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          color: var(--primary-text-color, #ffffff);
+        }
+        .stay-person-tag {
+          font-weight: normal;
+          font-size: 0.85rem;
+          color: var(--secondary-text-color, #aaaaaa);
+        }
+        .stay-duration-tag {
           background: var(--primary-color, #03a9f4);
           color: #ffffff;
-          border-radius: 12px;
+          border-radius: 10px;
           padding: 2px 8px;
           font-size: 0.75rem;
           font-weight: 600;
+          flex-shrink: 0;
         }
-        .stay-sub-item {
-          margin-top: 6px;
-          padding-top: 6px;
-          border-top: 1px dashed var(--divider-color, rgba(255,255,255,0.08));
-          font-size: 0.85rem;
+        .stay-meta {
           color: var(--secondary-text-color, #aaaaaa);
+          font-size: 0.85rem;
+          margin-top: 3px;
         }
         .stay-empty { color: var(--secondary-text-color); font-size: 0.9rem; }
         
@@ -248,35 +271,45 @@ class ZeitachsePanel extends HTMLElement {
         ${LEAFLET_SHADOW_CSS}
       </style>
       <div class="panel-root">
-        <div class="top-bar">
-          <div class="status" id="status">Zeitachse lädt…</div>
-          <button class="view-toggle-btn" id="toggle-view-btn" type="button">⛶ Vollbild Karte</button>
-        </div>
+        <div class="status" id="status">Zeitachse lädt…</div>
         <div class="main-split">
           <div class="map-wrapper" id="map-wrapper">
             <div id="map"></div>
             <div class="controls" id="controls"></div>
+            <button class="fullscreen-fab" id="fullscreen-fab" type="button" title="Vollbild Karte umschalten" aria-label="Vollbild Karte umschalten">
+              <svg id="icon-expand" viewBox="0 0 24 24" width="22" height="22">
+                <path fill="currentColor" d="M5,5H10V7H7V10H5V5M14,5H19V10H17V7H14V5M17,14H19V19H14V17H17V14M10,17V19H5V14H7V17H10Z"/>
+              </svg>
+              <svg id="icon-shrink" viewBox="0 0 24 24" width="22" height="22" style="display:none;">
+                <path fill="currentColor" d="M14,14H19V16H16V19H14V14M5,14H10V19H8V16H5V14M8,5H10V10H5V8H8V5M19,8V10H14V5H16V8H19Z"/>
+              </svg>
+            </button>
           </div>
           <div class="stay-list-panel" id="stay-list"></div>
         </div>
       </div>
     `;
 
-    const toggleBtn = this.shadowRoot.getElementById("toggle-view-btn");
-    toggleBtn.addEventListener("click", () => {
+    const fab = this.shadowRoot.getElementById("fullscreen-fab");
+    const iconExpand = this.shadowRoot.getElementById("icon-expand");
+    const iconShrink = this.shadowRoot.getElementById("icon-shrink");
+    const mapWrapper = this.shadowRoot.getElementById("map-wrapper");
+    const stayList = this.shadowRoot.getElementById("stay-list");
+
+    fab.addEventListener("click", () => {
       this._isFullMap = !this._isFullMap;
-      const mapWrapper = this.shadowRoot.getElementById("map-wrapper");
-      const stayList = this.shadowRoot.getElementById("stay-list");
       if (this._isFullMap) {
         mapWrapper.classList.add("full-map");
         stayList.classList.add("hidden");
-        toggleBtn.textContent = "◫ Geteilte Ansicht (60/40)";
+        iconExpand.style.display = "none";
+        iconShrink.style.display = "block";
       } else {
         mapWrapper.classList.remove("full-map");
         stayList.classList.remove("hidden");
-        toggleBtn.textContent = "⛶ Vollbild Karte";
+        iconExpand.style.display = "block";
+        iconShrink.style.display = "none";
       }
-      setTimeout(() => this.map?.invalidateSize(true), 300);
+      setTimeout(() => this.map?.invalidateSize(true), 260);
     });
   }
 
@@ -451,7 +484,7 @@ class ZeitachsePanel extends HTMLElement {
       row.className = "person";
       row.innerHTML = `
         <input class="person-active" type="checkbox" ${person.active ? "checked" : ""}>
-        <span class="dot" style="background:${person.color}"></span>
+        <span class="dot" style="background:${person.color}; margin-right:4px;"></span>
         <span class="person-name">${escapeHtml(person.name)}</span>
         <input class="color-picker" type="color" value="${person.color}" aria-label="Farbe für ${escapeHtml(person.name)}">
       `;
@@ -525,6 +558,7 @@ class ZeitachsePanel extends HTMLElement {
     this.layers = [];
     this.stayMarkers = [];
 
+    const tolerance = RANGE_TOLERANCE_METERS[this.selectedRange] || 3;
     let hasData = false;
     for (const person of this.people.filter((it) => it.active)) {
       const timeline = this.timelineByPerson.get(person.entity_id) || [];
@@ -533,7 +567,7 @@ class ZeitachsePanel extends HTMLElement {
       if (points.length === 0) continue;
       hasData = true;
 
-      const simplified = simplifyPoints(points, 3);
+      const simplified = simplifyPoints(points, tolerance);
       const polyline = window.L.polyline(simplified, {
         color: person.color,
         weight: 4,
@@ -547,7 +581,7 @@ class ZeitachsePanel extends HTMLElement {
         radius: 7,
         renderer: window.L.canvas({ padding: 0.5 }),
       }).addTo(this.map);
-      marker.bindPopup(`<strong>${escapeHtml(person.name)}</strong><br>${points.length} Punkte`);
+      marker.bindPopup(`<strong>${escapeHtml(person.name)}</strong><br>${points.length} Snapshots`);
       this.layers.push(marker);
     }
 
@@ -555,7 +589,7 @@ class ZeitachsePanel extends HTMLElement {
       hasData = true;
       const key = pointKey(cluster.point);
       const poi = this.poiByPoint.get(key) || null;
-      const radius = Math.min(14, 7 + Math.log2(cluster.stays.length + 1) * 2);
+      const radius = Math.min(13, 6 + Math.log2(cluster.stays.length + 1) * 2);
       const stayMarker = window.L.circleMarker(cluster.point, {
         radius,
         color: "#f57c00",
@@ -604,15 +638,18 @@ class ZeitachsePanel extends HTMLElement {
     // Sort clusters by importance: totalDurationMs
     const sortedClusters = [...this.stayClusters].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
     
-    // Decluttering logic based on zoom level:
-    // zoom < 10 (Country scale): show top 3 places
-    // zoom 10-12 (Region/City scale): show top 8 places
-    // zoom >= 13 (Street scale): show all places
+    // Generous decluttering thresholds so labels appear early:
+    // zoom < 7: top 15 places
+    // zoom 7-10: top 30 places
+    // zoom 11-12: top 60 places
+    // zoom >= 13: all places
     let maxVisibleTooltips = sortedClusters.length;
-    if (currentZoom < 10) {
-      maxVisibleTooltips = 3;
+    if (currentZoom < 7) {
+      maxVisibleTooltips = 15;
+    } else if (currentZoom < 11) {
+      maxVisibleTooltips = 30;
     } else if (currentZoom < 13) {
-      maxVisibleTooltips = 8;
+      maxVisibleTooltips = 60;
     }
 
     const visibleClusterIds = new Set(
@@ -739,8 +776,8 @@ class ZeitachsePanel extends HTMLElement {
     const container = this.shadowRoot.getElementById("stay-list");
     if (!container) return;
 
-    const clusters = this.stayClusters;
-    if (!clusters.length) {
+    const stays = this.stays;
+    if (!stays.length) {
       container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
       return;
     }
@@ -750,39 +787,34 @@ class ZeitachsePanel extends HTMLElement {
       timeStyle: "short",
     });
 
-    const content = clusters
-      .map((cluster) => {
-        const key = pointKey(cluster.point);
+    const content = stays
+      .map((stay) => {
+        const key = pointKey(stay.canonicalPoint || stay.point);
         const poi = this.poiByPoint.get(key) || null;
         const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
         const poiLink = poi?.url
           ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
           : "";
-        const visitsHtml = cluster.stays
-          .map((stay) => `
-            <div class="stay-sub-item">
-              <div>${formatter.format(stay.start)} → ${formatter.format(stay.end)} · <strong>${this._formatDuration(stay.durationMs)}</strong> (${stay.samples} Snapshots)</div>
-            </div>
-          `)
-          .join("");
 
         return `
-          <div class="stay-group">
-            <div class="stay-group-header">
-              <div class="stay-group-title">
-                <span class="dot" style="background:${cluster.person.color}; display:inline-block; margin-right:6px;"></span>
-                <span>${poiName}</span>
-                <span style="font-weight:normal; font-size:0.85rem; color:var(--secondary-text-color);">(${escapeHtml(cluster.person.name)})${poiLink}</span>
+          <div class="stay-item">
+            <div class="stay-item-header">
+              <div class="stay-item-title">
+                <span class="dot" style="background:${stay.person.color};"></span>
+                <strong>${poiName}</strong>
+                <span class="stay-person-tag">(${escapeHtml(stay.person.name)})${poiLink}</span>
               </div>
-              <span class="stay-group-badge">${cluster.stays.length}× · ${this._formatDuration(cluster.totalDurationMs)}</span>
+              <span class="stay-duration-tag">${this._formatDuration(stay.durationMs)}</span>
             </div>
-            ${visitsHtml}
+            <div class="stay-meta">
+              ${formatter.format(stay.start)} → ${formatter.format(stay.end)} · ${stay.samples} Snapshots
+            </div>
           </div>
         `;
       })
       .join("");
 
-    container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${clusters.length} Orte)</div>${content}`;
+    container.innerHTML = `<div class="stay-title">Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${stays.length} Besuche)</div>${content}`;
   }
 
   static get properties() {
