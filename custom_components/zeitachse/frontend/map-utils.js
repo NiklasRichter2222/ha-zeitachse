@@ -283,30 +283,6 @@ export const renderTimelineTrack = (map, points, person, options = {}) => {
     layers.push(polyline);
   }
 
-  // Direction Arrows along the route (every few points where distance >= 30m)
-  const minArrowDistance = 30;
-  const arrowInterval = Math.max(1, Math.floor((totalPoints - 1) / 8));
-
-  for (let i = 0; i < totalPoints - 1; i += arrowInterval) {
-    const p1 = simplified[i];
-    const p2 = simplified[i + 1];
-    const dist = haversineMeters(p1, p2);
-    if (dist >= minArrowDistance) {
-      const bearing = calculateBearing(p1, p2);
-      const mid = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
-      const t = (i + 1) / totalPoints;
-      const arrowOpacity = Math.min(0.95, 0.35 + 0.6 * t);
-      const arrowIcon = createDirectionArrowIcon(person.color, bearing, arrowOpacity, 16);
-      if (arrowIcon) {
-        const arrowMarker = window.L.marker(mid, {
-          icon: arrowIcon,
-          interactive: false,
-        }).addTo(map);
-        layers.push(arrowMarker);
-      }
-    }
-  }
-
   // Start Marker (Origin of selected time period)
   const startPoint = simplified[0];
   const startMarker = window.L.circleMarker(startPoint, {
@@ -320,33 +296,45 @@ export const renderTimelineTrack = (map, points, person, options = {}) => {
   startMarker.bindPopup(`<strong>${escapeHtml(person.name)}</strong> · Startpunkt<br>Ausgangspunkt im gewählten Zeitraum`);
   layers.push(startMarker);
 
-  // End / Latest Marker (Destination / Current Location)
+  // End / Latest Marker (Destination / Current Location with integrated Direction Arrow)
   const lastPoint = simplified[totalPoints - 1];
   const prevPoint = simplified[totalPoints - 2];
   const finalBearing = calculateBearing(prevPoint, lastPoint);
   const headingStr = compassHeading(finalBearing);
 
-  // Final direction arrow indicator right at the destination
-  const endArrowIcon = createDirectionArrowIcon(person.color, finalBearing, 1.0, 20);
-  if (endArrowIcon) {
-    const endArrowMarker = window.L.marker(lastPoint, {
-      icon: endArrowIcon,
-      interactive: false,
-      zIndexOffset: 500,
-    }).addTo(map);
-    layers.push(endArrowMarker);
-  }
+  // Unified destination pin with directional arrow pointing in the travel heading
+  const endIcon = window.L.divIcon({
+    className: "zeitachse-direction-pin",
+    html: `
+      <div style="
+        transform: rotate(${finalBearing}deg);
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      ">
+        <svg viewBox="0 0 28 28" width="28" height="28" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); overflow: visible;">
+          <!-- Directional navigation pointer pointing in movement direction -->
+          <polygon points="14,1 21,11 14,8 7,11" fill="${person.color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+          <!-- Central location dot -->
+          <circle cx="14" cy="14" r="7.5" fill="${person.color}" stroke="#ffffff" stroke-width="2.5"/>
+        </svg>
+      </div>
+    `,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
+  });
 
-  const endMarker = window.L.circleMarker(lastPoint, {
-    color: "#ffffff",
-    fillColor: person.color,
-    fillOpacity: 1.0,
-    radius: 7.5,
-    weight: 2.5,
-    renderer: window.L.canvas({ padding: 0.5 }),
+  const endMarker = window.L.marker(lastPoint, {
+    icon: endIcon,
+    zIndexOffset: 1000,
   }).addTo(map);
+
   endMarker.bindPopup(
-    `<strong>${escapeHtml(person.name)}</strong> · Aktuell / Letzter Standort<br>Richtung: ${finalBearing}° (${headingStr})<br>${points.length} Snapshots`
+    `<strong>${escapeHtml(person.name)}</strong> · Aktuell / Letzter Standort<br>Bewegungsrichtung: ${finalBearing}° (${headingStr})<br>${points.length} Snapshots`
   );
   layers.push(endMarker);
 
@@ -434,12 +422,14 @@ export const setupTileLayer = (map, config = {}) => {
 
   return {
     tileLayer,
-    setProvider(newKey) {
-      const nextProvider = getProviderConfig(newKey);
-      activeProviderKey = newKey;
+    setProvider(newKey, newUrl = null) {
+      activeProviderKey = newKey || activeProviderKey;
+      activeUrl = newUrl;
+      const nextProvider = getProviderConfig(activeProviderKey);
       errorCount = 0;
       map.removeLayer(tileLayer);
-      tileLayer = window.L.tileLayer(nextProvider.url, {
+      const urlToUse = (activeProviderKey === "custom" && activeUrl) ? activeUrl : nextProvider.url;
+      tileLayer = window.L.tileLayer(urlToUse, {
         ...nextProvider.options,
         referrerPolicy: "origin",
       }).addTo(map);

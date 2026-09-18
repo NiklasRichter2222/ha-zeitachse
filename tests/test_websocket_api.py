@@ -116,6 +116,8 @@ async def test_ws_list_people(mock_runtime):
     assert people[0]["active"] is True
     assert people[1]["entity_id"] == "person.bob"
     assert people[1]["active"] is False
+    assert "map_settings" in args[1]
+    assert args[1]["map_settings"]["tile_provider"] == "local_osm"
 
 
 @pytest.mark.asyncio

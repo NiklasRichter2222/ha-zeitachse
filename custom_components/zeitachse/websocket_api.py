@@ -18,9 +18,12 @@ from .const import (
     CONF_PERSON_COLORS,
     CONF_STAY_DISTANCE_METERS,
     CONF_STAY_MIN_SNAPSHOTS,
+    CONF_TILE_PROVIDER,
+    CONF_TILE_URL,
     CONF_TRACKED_PERSONS,
     DEFAULT_STAY_DISTANCE_METERS,
     DEFAULT_STAY_MIN_SNAPSHOTS,
+    DEFAULT_TILE_PROVIDER,
     MAX_STAY_DISTANCE_METERS,
     MAX_STAY_MIN_SNAPSHOTS,
     MIN_STAY_DISTANCE_METERS,
@@ -200,6 +203,16 @@ async def ws_list_people(
                             CONF_STAY_DISTANCE_METERS, DEFAULT_STAY_DISTANCE_METERS
                         ),
                     ),
+                ),
+            },
+            "map_settings": {
+                "tile_provider": entry.options.get(
+                    CONF_TILE_PROVIDER,
+                    entry.data.get(CONF_TILE_PROVIDER, DEFAULT_TILE_PROVIDER),
+                ),
+                "tile_url": entry.options.get(
+                    CONF_TILE_URL,
+                    entry.data.get(CONF_TILE_URL, ""),
                 ),
             },
         },

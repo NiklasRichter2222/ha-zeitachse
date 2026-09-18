@@ -21,11 +21,14 @@ from .const import (
     CONF_REPLACE_TRACKING_DATA,
     CONF_STAY_DISTANCE_METERS,
     CONF_STAY_MIN_SNAPSHOTS,
+    CONF_TILE_PROVIDER,
+    CONF_TILE_URL,
     CONF_TRACKED_PERSONS,
     DEFAULT_ENABLE_DASHBOARD,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_STAY_DISTANCE_METERS,
     DEFAULT_STAY_MIN_SNAPSHOTS,
+    DEFAULT_TILE_PROVIDER,
     DOMAIN,
     MAX_STAY_DISTANCE_METERS,
     MAX_STAY_MIN_SNAPSHOTS,
@@ -128,6 +131,26 @@ def _build_schema(options: Mapping[str, Any], is_options_flow: bool = False) -> 
                     step=1,
                 )
             ),
+            vol.Optional(
+                CONF_TILE_PROVIDER,
+                default=options.get(CONF_TILE_PROVIDER, DEFAULT_TILE_PROVIDER),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {"value": "local_osm", "label": "OpenStreetMap (HA Cache - Empfohlen)"},
+                        {"value": "osm_de", "label": "OpenStreetMap (Deutschland)"},
+                        {"value": "esri_street", "label": "Esri World Street"},
+                        {"value": "esri_topo", "label": "Esri Topo"},
+                        {"value": "osm_standard", "label": "OpenStreetMap (Direkt)"},
+                        {"value": "custom", "label": "Benutzerdefinierte URL"},
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(
+                CONF_TILE_URL,
+                default=options.get(CONF_TILE_URL, ""),
+            ): selector.TextSelector(),
         }
     )
 

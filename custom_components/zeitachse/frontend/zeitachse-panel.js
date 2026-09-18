@@ -496,6 +496,10 @@ class ZeitachsePanel extends HTMLElement {
       const result = await this._hass.callWS({ type: "zeitachse/list_people" });
       this.people = result.people || [];
       this.staySettings = this._normalizeStaySettings(result.stay_settings);
+      this.mapSettings = result.map_settings || {};
+      if (this.mapSettings.tile_provider && this._tileController) {
+        this._tileController.setProvider(this.mapSettings.tile_provider, this.mapSettings.tile_url);
+      }
       console.debug(`[zeitachse-panel] Loaded ${this.people.length} people`);
       await this._loadTimelines();
       this._renderControls();
@@ -575,23 +579,6 @@ class ZeitachsePanel extends HTMLElement {
     summary.className = "summary";
     summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
     controls.appendChild(summary);
-
-    const basemapRow = document.createElement("div");
-    basemapRow.className = "basemap-row";
-    basemapRow.style.margin = "6px 0 8px 0";
-    basemapRow.innerHTML = `
-      <label style="font-size:0.8rem; color:var(--secondary-text-color); display:flex; align-items:center; gap:6px;">
-        <span>🗺️ Karte:</span>
-        <select class="basemap-select" style="flex:1; background:transparent; color:inherit; border:1px solid var(--divider-color); border-radius:6px; padding:2px 4px; font-size:0.8rem;">
-          ${Object.entries(BASEMAP_PROVIDERS).map(([k, v]) => `<option value="${k}" ${(this._selectedBasemap || "local_osm") === k ? "selected" : ""}>${escapeHtml(v.name)}</option>`).join("")}
-        </select>
-      </label>
-    `;
-    basemapRow.querySelector(".basemap-select").addEventListener("change", (e) => {
-      this._selectedBasemap = e.target.value;
-      this._tileController?.setProvider(this._selectedBasemap);
-    });
-    controls.appendChild(basemapRow);
 
     for (const person of this.people) {
       const row = document.createElement("div");
