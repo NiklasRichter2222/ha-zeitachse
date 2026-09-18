@@ -174,3 +174,276 @@ export const ensureLeafletLoaded = () => {
 
   return leafletLoadingPromise;
 };
+
+export const escapeHtml = (value) => {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+};
+
+export const calculateBearing = (startPoint, endPoint) => {
+  if (!startPoint || !endPoint) return 0;
+  const [lat1, lon1] = startPoint;
+  const [lat2, lon2] = endPoint;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const toDeg = (rad) => (rad * 180) / Math.PI;
+  const dLon = toRad(lon2 - lon1);
+  const phi1 = toRad(lat1);
+  const phi2 = toRad(lat2);
+  const y = Math.sin(dLon) * Math.cos(phi2);
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+  const bearing = (toDeg(Math.atan2(y, x)) + 360) % 360;
+  return Math.round(bearing);
+};
+
+export const compassHeading = (bearing) => {
+  const directions = ["N", "NO", "O", "SO", "S", "SW", "W", "NW"];
+  const index = Math.round(bearing / 45) % 8;
+  return directions[index];
+};
+
+export const createDirectionArrowIcon = (color, bearing, opacity = 0.9, size = 16) => {
+  if (!window.L) return null;
+  return window.L.divIcon({
+    className: "zeitachse-direction-arrow",
+    html: `
+      <div style="
+        transform: rotate(${bearing}deg);
+        width: ${size}px;
+        height: ${size}px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: ${opacity};
+        pointer-events: none;
+      ">
+        <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));">
+          <path d="M12 2 L21 21 L12 17 L3 21 Z" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+      </div>
+    `,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+};
+
+export const renderTimelineTrack = (map, points, person, options = {}) => {
+  if (!map || !window.L || !Array.isArray(points) || points.length === 0) {
+    return [];
+  }
+
+  const layers = [];
+  const tolerance = options.tolerance || 3;
+  const simplified = simplifyPoints(points, tolerance);
+
+  if (simplified.length === 0) return layers;
+
+  // Single point case
+  if (simplified.length === 1) {
+    const singleMarker = window.L.circleMarker(simplified[0], {
+      color: person.color,
+      fillColor: person.color,
+      fillOpacity: 1.0,
+      radius: 7,
+      weight: 2,
+      renderer: window.L.canvas({ padding: 0.5 }),
+    }).addTo(map);
+    singleMarker.bindPopup(`<strong>${escapeHtml(person.name)}</strong><br>1 Snapshot`);
+    layers.push(singleMarker);
+    return layers;
+  }
+
+  // 2+ points: Timeline Gradient & Direction Arrows
+  const totalPoints = simplified.length;
+  // Divide into progressive segments for gradient effect
+  const numSegments = Math.min(16, totalPoints - 1);
+  const pointsPerSegment = (totalPoints - 1) / numSegments;
+
+  for (let s = 0; s < numSegments; s += 1) {
+    const startIdx = Math.floor(s * pointsPerSegment);
+    const endIdx = Math.min(totalPoints - 1, Math.floor((s + 1) * pointsPerSegment) + 1);
+    const segmentSlice = simplified.slice(startIdx, endIdx);
+    if (segmentSlice.length < 2) continue;
+
+    const t = (s + 1) / numSegments; // 0 < t <= 1 (1 = newest)
+    const opacity = Math.min(1.0, 0.22 + 0.78 * t);
+    const weight = 3 + 2.5 * t;
+
+    const polyline = window.L.polyline(segmentSlice, {
+      color: person.color,
+      opacity,
+      weight,
+      lineCap: "round",
+      lineJoin: "round",
+      renderer: window.L.canvas({ padding: 0.5 }),
+    }).addTo(map);
+    layers.push(polyline);
+  }
+
+  // Direction Arrows along the route (every few points where distance >= 30m)
+  const minArrowDistance = 30;
+  const arrowInterval = Math.max(1, Math.floor((totalPoints - 1) / 8));
+
+  for (let i = 0; i < totalPoints - 1; i += arrowInterval) {
+    const p1 = simplified[i];
+    const p2 = simplified[i + 1];
+    const dist = haversineMeters(p1, p2);
+    if (dist >= minArrowDistance) {
+      const bearing = calculateBearing(p1, p2);
+      const mid = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
+      const t = (i + 1) / totalPoints;
+      const arrowOpacity = Math.min(0.95, 0.35 + 0.6 * t);
+      const arrowIcon = createDirectionArrowIcon(person.color, bearing, arrowOpacity, 16);
+      if (arrowIcon) {
+        const arrowMarker = window.L.marker(mid, {
+          icon: arrowIcon,
+          interactive: false,
+        }).addTo(map);
+        layers.push(arrowMarker);
+      }
+    }
+  }
+
+  // Start Marker (Origin of selected time period)
+  const startPoint = simplified[0];
+  const startMarker = window.L.circleMarker(startPoint, {
+    color: person.color,
+    fillColor: "#ffffff",
+    fillOpacity: 0.95,
+    radius: 5.5,
+    weight: 2.5,
+    renderer: window.L.canvas({ padding: 0.5 }),
+  }).addTo(map);
+  startMarker.bindPopup(`<strong>${escapeHtml(person.name)}</strong> · Startpunkt<br>Ausgangspunkt im gewählten Zeitraum`);
+  layers.push(startMarker);
+
+  // End / Latest Marker (Destination / Current Location)
+  const lastPoint = simplified[totalPoints - 1];
+  const prevPoint = simplified[totalPoints - 2];
+  const finalBearing = calculateBearing(prevPoint, lastPoint);
+  const headingStr = compassHeading(finalBearing);
+
+  // Final direction arrow indicator right at the destination
+  const endArrowIcon = createDirectionArrowIcon(person.color, finalBearing, 1.0, 20);
+  if (endArrowIcon) {
+    const endArrowMarker = window.L.marker(lastPoint, {
+      icon: endArrowIcon,
+      interactive: false,
+      zIndexOffset: 500,
+    }).addTo(map);
+    layers.push(endArrowMarker);
+  }
+
+  const endMarker = window.L.circleMarker(lastPoint, {
+    color: "#ffffff",
+    fillColor: person.color,
+    fillOpacity: 1.0,
+    radius: 7.5,
+    weight: 2.5,
+    renderer: window.L.canvas({ padding: 0.5 }),
+  }).addTo(map);
+  endMarker.bindPopup(
+    `<strong>${escapeHtml(person.name)}</strong> · Aktuell / Letzter Standort<br>Richtung: ${finalBearing}° (${headingStr})<br>${points.length} Snapshots`
+  );
+  layers.push(endMarker);
+
+  return layers;
+};
+
+export const BASEMAP_PROVIDERS = {
+  local_osm: {
+    name: "OpenStreetMap (HA Cache)",
+    url: "/api/zeitachse/tiles/{z}/{x}/{y}.png",
+    options: {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+    },
+  },
+  osm_de: {
+    name: "OpenStreetMap (DE)",
+    url: "https://tile.openstreetmap.de/{z}/{x}/{y}.png",
+    options: {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+    },
+  },
+  esri_street: {
+    name: "Esri World Street",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    options: {
+      maxZoom: 19,
+      attribution: "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom",
+    },
+  },
+  esri_topo: {
+    name: "Esri Topo",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    options: {
+      maxZoom: 19,
+      attribution: "Tiles &copy; Esri",
+    },
+  },
+  osm_standard: {
+    name: "OpenStreetMap (Direkt)",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    options: {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+    },
+  },
+};
+
+export const setupTileLayer = (map, config = {}) => {
+  if (!map || !window.L) return null;
+
+  let activeProviderKey = config.provider || "local_osm";
+  let activeUrl = config.url;
+  let activeAttribution = config.attribution;
+
+  const getProviderConfig = (key) => {
+    return BASEMAP_PROVIDERS[key] || BASEMAP_PROVIDERS.local_osm;
+  };
+
+  const provider = getProviderConfig(activeProviderKey);
+  const tileUrl = activeUrl || provider.url;
+  const tileOptions = {
+    attribution: activeAttribution || provider.options.attribution,
+    maxZoom: provider.options.maxZoom || 19,
+    subdomains: provider.options.subdomains || "abc",
+    referrerPolicy: "origin",
+  };
+
+  let tileLayer = window.L.tileLayer(tileUrl, tileOptions).addTo(map);
+
+  let errorCount = 0;
+  tileLayer.on("tileerror", () => {
+    errorCount += 1;
+    if (errorCount === 3 && activeProviderKey !== "esri_street" && !activeUrl) {
+      console.warn("[zeitachse] Primary tile layer encountered errors, falling back to Esri World Street...");
+      map.removeLayer(tileLayer);
+      const fallback = BASEMAP_PROVIDERS.esri_street;
+      tileLayer = window.L.tileLayer(fallback.url, {
+        attribution: fallback.options.attribution,
+        maxZoom: fallback.options.maxZoom,
+      }).addTo(map);
+    }
+  });
+
+  return {
+    tileLayer,
+    setProvider(newKey) {
+      const nextProvider = getProviderConfig(newKey);
+      activeProviderKey = newKey;
+      errorCount = 0;
+      map.removeLayer(tileLayer);
+      tileLayer = window.L.tileLayer(nextProvider.url, {
+        ...nextProvider.options,
+        referrerPolicy: "origin",
+      }).addTo(map);
+      return tileLayer;
+    },
+  };
+};

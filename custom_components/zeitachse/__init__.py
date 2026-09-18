@@ -33,6 +33,7 @@ from .const import (
 )
 from .poi_lookup import PoiLookupService
 from .storage import EncryptedSnapshotStorage, UserPreferenceStorage
+from .tile_proxy import ZeitachseTileProxyView
 from .websocket_api import ZeitachseRuntimeData, async_register_websocket_api
 
 _LOGGER = logging.getLogger(__name__)
@@ -229,6 +230,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["websocket_registered"] = True
     else:
         hass.data[RUNTIME_DATA_KEY] = runtime
+
+    if not hass.data[DOMAIN].get("tile_view_registered"):
+        hass.http.register_view(ZeitachseTileProxyView(hass))
+        hass.data[DOMAIN]["tile_view_registered"] = True
 
     if entry.options.get(
         CONF_ENABLE_DASHBOARD,

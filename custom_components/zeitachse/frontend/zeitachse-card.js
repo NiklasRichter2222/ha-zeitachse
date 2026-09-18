@@ -1,5 +1,16 @@
 import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
-import { clusterStays, ensureLeafletLoaded, haversineMeters, pointKey, simplifyPoints, toPoint, toTimestamp } from "./map-utils.js";
+import {
+  BASEMAP_PROVIDERS,
+  clusterStays,
+  ensureLeafletLoaded,
+  haversineMeters,
+  pointKey,
+  renderTimelineTrack,
+  setupTileLayer,
+  simplifyPoints,
+  toPoint,
+  toTimestamp,
+} from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
@@ -438,9 +449,11 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         touchZoom: this._interactive,
         zoomControl: this._interactive,
       }).setView(this._defaultCenter, this._defaultZoom);
-      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(this.map);
+      this._tileController = setupTileLayer(this.map, {
+        provider: this.config?.tile_provider || "local_osm",
+        url: this.config?.tile_url,
+        attribution: this.config?.tile_attribution,
+      });
 
       this.map.on("zoomend", () => {
         this._updateTooltipsVisibility();
@@ -524,21 +537,8 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
 
       hasData = true;
       const tolerance = RANGE_TOLERANCE_METERS[this.selectedRange] || 3;
-      const simplified = simplifyPoints(points, tolerance);
-      const polyline = window.L.polyline(simplified, {
-        color: person.color,
-        weight: 4,
-        renderer: window.L.canvas({ padding: 0.5 }),
-      }).addTo(this.map);
-      this.layers.push(polyline);
-      const lastPoint = points[points.length - 1];
-      const marker = window.L.circleMarker(lastPoint, {
-        color: person.color,
-        radius: 7,
-        renderer: window.L.canvas({ padding: 0.5 }),
-      }).addTo(this.map);
-      marker.bindPopup(`<strong>${escapeHtml(person.name)}</strong><br>${points.length} Snapshots`);
-      this.layers.push(marker);
+      const trackLayers = renderTimelineTrack(this.map, points, person, { tolerance });
+      this.layers.push(...trackLayers);
     }
 
     for (const cluster of this.stayClusters) {
@@ -886,6 +886,17 @@ class ZeitachseCardEditor extends HTMLElement {
         <label>Zoom
           <input id="zoom" type="number" min="1" step="1" value="${zoom}" style="width:100%;">
         </label>
+        <label>Kartenanbieter
+          <select id="tile_provider" style="width:100%;">
+            ${Object.entries(BASEMAP_PROVIDERS).map(([k, v]) => `<option value="${k}" ${(this._config.tile_provider || "local_osm") === k ? "selected" : ""}>${escapeHtml(v.name)}</option>`).join("")}
+            <option value="custom" ${this._config.tile_provider === "custom" ? "selected" : ""}>Benutzerdefiniert (URL)</option>
+          </select>
+        </label>
+        ${this._config.tile_provider === "custom" ? `
+          <label>Karten-URL
+            <input id="tile_url" type="text" placeholder="https://.../{z}/{x}/{y}.png" value="${escapeHtml(this._config.tile_url || "")}" style="width:100%;">
+          </label>
+        ` : ""}
         <label>
           <input id="interactive" type="checkbox" ${interactive ? "checked" : ""}>
           Interaktive Karte
@@ -918,6 +929,18 @@ class ZeitachseCardEditor extends HTMLElement {
     });
     this.querySelector("#interactive")?.addEventListener("change", (event) => {
       const next = { ...this._config, interactive: Boolean(event.target.checked) };
+      this._fireConfigChanged(next);
+    });
+    this.querySelector("#tile_provider")?.addEventListener("change", (event) => {
+      const next = { ...this._config, tile_provider: event.target.value };
+      if (event.target.value !== "custom") {
+        delete next.tile_url;
+      }
+      this._fireConfigChanged(next);
+      this._render();
+    });
+    this.querySelector("#tile_url")?.addEventListener("change", (event) => {
+      const next = { ...this._config, tile_url: event.target.value };
       this._fireConfigChanged(next);
     });
   }

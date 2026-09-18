@@ -1,5 +1,16 @@
 import { LEAFLET_SHADOW_CSS } from "./leaflet-shadow-css.js";
-import { clusterStays, ensureLeafletLoaded, haversineMeters, pointKey, simplifyPoints, toPoint, toTimestamp } from "./map-utils.js";
+import {
+  BASEMAP_PROVIDERS,
+  clusterStays,
+  ensureLeafletLoaded,
+  haversineMeters,
+  pointKey,
+  renderTimelineTrack,
+  setupTileLayer,
+  simplifyPoints,
+  toPoint,
+  toTimestamp,
+} from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
@@ -415,9 +426,9 @@ class ZeitachsePanel extends HTMLElement {
       this.map = window.L.map(mapElement, {
         preferCanvas: true,
       }).setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
-      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(this.map);
+      this._tileController = setupTileLayer(this.map, {
+        provider: this._selectedBasemap || "local_osm",
+      });
 
       this.map.on("zoomend", () => {
         this._updateTooltipsVisibility();
@@ -565,6 +576,23 @@ class ZeitachsePanel extends HTMLElement {
     summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
     controls.appendChild(summary);
 
+    const basemapRow = document.createElement("div");
+    basemapRow.className = "basemap-row";
+    basemapRow.style.margin = "6px 0 8px 0";
+    basemapRow.innerHTML = `
+      <label style="font-size:0.8rem; color:var(--secondary-text-color); display:flex; align-items:center; gap:6px;">
+        <span>🗺️ Karte:</span>
+        <select class="basemap-select" style="flex:1; background:transparent; color:inherit; border:1px solid var(--divider-color); border-radius:6px; padding:2px 4px; font-size:0.8rem;">
+          ${Object.entries(BASEMAP_PROVIDERS).map(([k, v]) => `<option value="${k}" ${(this._selectedBasemap || "local_osm") === k ? "selected" : ""}>${escapeHtml(v.name)}</option>`).join("")}
+        </select>
+      </label>
+    `;
+    basemapRow.querySelector(".basemap-select").addEventListener("change", (e) => {
+      this._selectedBasemap = e.target.value;
+      this._tileController?.setProvider(this._selectedBasemap);
+    });
+    controls.appendChild(basemapRow);
+
     for (const person of this.people) {
       const row = document.createElement("div");
       row.className = "person";
@@ -654,22 +682,8 @@ class ZeitachsePanel extends HTMLElement {
       if (points.length === 0) continue;
       hasData = true;
 
-      const simplified = simplifyPoints(points, tolerance);
-      const polyline = window.L.polyline(simplified, {
-        color: person.color,
-        weight: 4,
-        renderer: window.L.canvas({ padding: 0.5 }),
-      }).addTo(this.map);
-      this.layers.push(polyline);
-
-      const lastPoint = points[points.length - 1];
-      const marker = window.L.circleMarker(lastPoint, {
-        color: person.color,
-        radius: 7,
-        renderer: window.L.canvas({ padding: 0.5 }),
-      }).addTo(this.map);
-      marker.bindPopup(`<strong>${escapeHtml(person.name)}</strong><br>${points.length} Snapshots`);
-      this.layers.push(marker);
+      const trackLayers = renderTimelineTrack(this.map, points, person, { tolerance });
+      this.layers.push(...trackLayers);
     }
 
     for (const cluster of this.stayClusters) {
