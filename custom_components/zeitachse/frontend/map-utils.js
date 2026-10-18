@@ -644,6 +644,60 @@ export const setupTileLayer = (map, config = {}) => {
     return base;
   };
 
+  const attachDirectionalTilePreload = (layer) => {
+    if (!layer || typeof layer._getTiledPixelBounds !== "function") return;
+    const baseGetBounds = layer._getTiledPixelBounds.bind(layer);
+    let lastCenterPx = null;
+    let lastZoom = null;
+    let vx = 0;
+    let vy = 0;
+
+    layer._getTiledPixelBounds = function (center) {
+      const bounds = baseGetBounds(center);
+      if (!bounds || !bounds.min || !bounds.max) return bounds;
+
+      // Always preload 1 full ring of tiles (256px) around the screen
+      const basePad = 256;
+      let extraLeft = 0;
+      let extraRight = 0;
+      let extraTop = 0;
+      let extraBottom = 0;
+
+      const cx = (bounds.min.x + bounds.max.x) * 0.5;
+      const cy = (bounds.min.y + bounds.max.y) * 0.5;
+      const z = this._tileZoom;
+
+      if (lastCenterPx && lastZoom === z) {
+        const dx = cx - lastCenterPx.x;
+        const dy = cy - lastCenterPx.y;
+        if (Math.abs(dx) < 2048 && Math.abs(dy) < 2048) {
+          vx = vx * 0.4 + dx * 0.6;
+          vy = vy * 0.4 + dy * 0.6;
+          // Preload up to 2 additional tiles (512px) ahead in the drag direction
+          if (vx > 2) extraRight = Math.min(512, Math.round(vx * 3.5));
+          if (vx < -2) extraLeft = Math.min(512, Math.round(-vx * 3.5));
+          if (vy > 2) extraBottom = Math.min(512, Math.round(vy * 3.5));
+          if (vy < -2) extraTop = Math.min(512, Math.round(-vy * 3.5));
+        } else {
+          vx = 0;
+          vy = 0;
+        }
+      } else {
+        vx = 0;
+        vy = 0;
+      }
+
+      lastCenterPx = { x: cx, y: cy };
+      lastZoom = z;
+
+      bounds.min.x -= basePad + extraLeft;
+      bounds.min.y -= basePad + extraTop;
+      bounds.max.x += basePad + extraRight;
+      bounds.max.y += basePad + extraBottom;
+      return bounds;
+    };
+  };
+
   const createLayer = (providerKey, customUrl, token) => {
     const provider = getProviderConfig(providerKey);
     const tileUrl = resolveTileUrl(providerKey, customUrl, token);
@@ -652,12 +706,17 @@ export const setupTileLayer = (map, config = {}) => {
       maxZoom: provider.options.maxZoom || 19,
       subdomains: provider.options.subdomains || "abc",
       referrerPolicy: "origin",
-      updateWhenIdle: true,
-      updateWhenZooming: false,
-      updateInterval: 200,
-      keepBuffer: 1,
+      updateWhenIdle: false,
+      updateWhenZooming: true,
+      updateInterval: 60,
+      keepBuffer: 4,
     };
-    const layer = window.L.tileLayer(tileUrl, tileOptions).addTo(map);
+    const layer = window.L.tileLayer(tileUrl, tileOptions);
+    attachDirectionalTilePreload(layer);
+    layer.addTo(map);
+    if (typeof layer._update === "function") {
+      layer._update();
+    }
 
     let consecutiveErrors = 0;
     layer.on("tileload", () => {
@@ -675,10 +734,16 @@ export const setupTileLayer = (map, config = {}) => {
         consecutiveErrors = 0;
         map.removeLayer(layer);
         const fallback = BASEMAP_PROVIDERS.local_osm;
-        tileLayer = window.L.tileLayer(resolveTileUrl("local_osm", null, activeToken), {
+        const fallbackLayer = window.L.tileLayer(resolveTileUrl("local_osm", null, activeToken), {
           attribution: fallback.options.attribution,
           maxZoom: fallback.options.maxZoom,
-        }).addTo(map);
+          updateWhenIdle: false,
+          updateWhenZooming: true,
+          updateInterval: 60,
+          keepBuffer: 4,
+        });
+        attachDirectionalTilePreload(fallbackLayer);
+        tileLayer = fallbackLayer.addTo(map);
       }
     });
     return layer;
