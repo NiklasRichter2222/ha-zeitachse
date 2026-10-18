@@ -302,15 +302,15 @@ class ZeitachsePanel extends HTMLElement {
         /* Floating HA Map Left Card */
         .controls {
           position: absolute;
-          top: 14px;
-          left: 14px;
+          top: 10px;
+          left: 10px;
           z-index: 1000;
-          width: min(310px, calc(100% - 70px));
-          max-height: calc(100% - 28px);
+          width: min(265px, calc(100% - 60px));
+          max-height: calc(100% - 20px);
           overflow-y: auto;
           border: 1px solid var(--zeitachse-border);
-          border-radius: 16px;
-          padding: 12px;
+          border-radius: 12px;
+          padding: 7px 8px;
           box-sizing: border-box;
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
@@ -324,9 +324,9 @@ class ZeitachsePanel extends HTMLElement {
           align-items: center;
           background: var(--zeitachse-pill-bg);
           border-radius: 999px;
-          padding: 3px;
+          padding: 2px;
           gap: 2px;
-          margin-bottom: 10px;
+          margin-bottom: 5px;
         }
         .range-btn {
           flex: 1;
@@ -334,8 +334,8 @@ class ZeitachsePanel extends HTMLElement {
           background: transparent;
           color: var(--zeitachse-text-secondary);
           border-radius: 999px;
-          padding: 6px 8px;
-          font-size: 0.8rem;
+          padding: 4px 5px;
+          font-size: 0.74rem;
           font-weight: 500;
           cursor: pointer;
           transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
@@ -349,103 +349,86 @@ class ZeitachsePanel extends HTMLElement {
           font-weight: 600;
           box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
         }
-        .controls-header-row {
+        .people-list {
           display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 4px 6px 4px;
-          border-bottom: 1px solid var(--zeitachse-border);
-          margin-bottom: 6px;
+          flex-direction: column;
+          gap: 2px;
         }
-        .controls-section-label {
-          font-size: 0.76rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-          color: var(--zeitachse-text-secondary);
-        }
-        .summary {
-          color: var(--zeitachse-text-secondary);
-          font-size: 0.76rem;
-        }
-        /* HA Map Style Person List Rows */
+        /* Compact Person Selector Rows */
         .person {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 6px 6px;
-          margin: 2px 0;
-          border-radius: 12px;
-          transition: background-color 0.15s ease;
+          gap: 7px;
+          padding: 3px 5px;
+          border-radius: 8px;
+          cursor: pointer;
+          user-select: none;
+          transition: background-color 0.15s ease, opacity 0.15s ease;
         }
         .person:hover {
           background: var(--zeitachse-surface-hover);
         }
+        .person.inactive {
+          opacity: 0.55;
+        }
         .person-avatar {
           position: relative;
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
+          width: 22px;
+          height: 22px;
+          border-radius: 6px;
           background: var(--zeitachse-badge-bg);
           color: var(--zeitachse-text);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 0.78rem;
+          font-size: 0.66rem;
           font-weight: 700;
           flex-shrink: 0;
-          cursor: pointer;
-          user-select: none;
-          border: 1.5px solid transparent;
-          transition: transform 0.15s ease, border-color 0.15s ease;
-        }
-        .person-avatar:hover {
-          transform: scale(1.04);
         }
         .dot {
-          width: 9px;
-          height: 9px;
+          width: 7px;
+          height: 7px;
           border-radius: 50%;
           position: absolute;
-          bottom: -2px;
-          right: -2px;
-          border: 2px solid var(--zeitachse-surface-solid);
+          bottom: -1px;
+          right: -1px;
+          border: 1.5px solid var(--zeitachse-surface-solid);
           display: inline-block;
         }
         .person-info {
           flex: 1;
           min-width: 0;
           display: flex;
-          flex-direction: column;
-          cursor: pointer;
+          align-items: baseline;
+          gap: 5px;
+          overflow: hidden;
         }
         .person-name {
-          font-size: 0.88rem;
+          font-size: 0.8rem;
           font-weight: 600;
           color: var(--zeitachse-text);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          line-height: 1.25;
+          line-height: 1.2;
         }
         .person-subtitle {
-          font-size: 0.74rem;
+          font-size: 0.68rem;
           color: var(--zeitachse-text-secondary);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          line-height: 1.25;
-          margin-top: 1px;
+          line-height: 1.2;
         }
         .person-actions {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
           flex-shrink: 0;
         }
         .color-picker {
-          width: 22px;
-          height: 22px;
+          width: 18px;
+          height: 18px;
           border: none;
           padding: 0;
           background: transparent;
@@ -453,11 +436,58 @@ class ZeitachsePanel extends HTMLElement {
           border-radius: 50%;
         }
         .person-active {
-          width: 16px;
-          height: 16px;
+          width: 14px;
+          height: 14px;
           accent-color: var(--zeitachse-accent);
           cursor: pointer;
           margin: 0;
+        }
+        @media (max-width: 640px) {
+          .controls {
+            top: 8px;
+            left: 8px;
+            width: min(235px, calc(100% - 54px));
+            padding: 5px 6px;
+            border-radius: 10px;
+          }
+          .range-row {
+            margin-bottom: 4px;
+          }
+          .range-btn {
+            padding: 3px 4px;
+            font-size: 0.7rem;
+          }
+          .people-list {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 3px;
+          }
+          .person {
+            padding: 2px 5px;
+            gap: 4px;
+            background: var(--zeitachse-pill-bg);
+            border-radius: 7px;
+            flex: 1 1 auto;
+          }
+          .person-avatar {
+            width: 18px;
+            height: 18px;
+            font-size: 0.6rem;
+          }
+          .person-name {
+            font-size: 0.74rem;
+          }
+          .person-subtitle {
+            display: none;
+          }
+          .color-picker {
+            width: 15px;
+            height: 15px;
+          }
+          .person-active {
+            width: 13px;
+            height: 13px;
+          }
         }
 
         /* Top-Right Map Action Controls (below Leaflet zoom buttons) */
@@ -979,21 +1009,8 @@ class ZeitachsePanel extends HTMLElement {
     }
     controls.appendChild(rangeRow);
 
-    const pointCount = this.people
-      .filter((it) => it.active)
-      .reduce((sum, person) => sum + (this.timelineByPerson.get(person.entity_id)?.length || 0), 0);
-
-    const headerRow = document.createElement("div");
-    headerRow.className = "controls-header-row";
-    const sectionLabel = document.createElement("span");
-    sectionLabel.className = "controls-section-label";
-    sectionLabel.textContent = "Personen";
-    const summary = document.createElement("div");
-    summary.className = "summary";
-    summary.textContent = `${this.people.filter((it) => it.active).length} aktiv · ${pointCount} Punkte`;
-    headerRow.appendChild(sectionLabel);
-    headerRow.appendChild(summary);
-    controls.appendChild(headerRow);
+    const peopleList = document.createElement("div");
+    peopleList.className = "people-list";
 
     for (const person of this.people) {
       const safeColor = sanitizeColor(person.color);
@@ -1002,13 +1019,13 @@ class ZeitachsePanel extends HTMLElement {
       const subtitle = escapeHtml(this._getPersonSubtitle(person));
 
       const row = document.createElement("div");
-      row.className = "person";
+      row.className = `person ${person.active ? "" : "inactive"}`;
       row.innerHTML = `
-        <div class="person-avatar" title="Auf ${escapeHtml(person.name)} zentrieren">
+        <div class="person-avatar">
           <span>${initials}</span>
           <span class="dot" style="background:${safeColor};"></span>
         </div>
-        <div class="person-info" title="Auf ${escapeHtml(person.name)} zentrieren">
+        <div class="person-info">
           <span class="person-name">${escapeHtml(person.name)}</span>
           <span class="person-subtitle">${subtitle}</span>
         </div>
@@ -1018,27 +1035,12 @@ class ZeitachsePanel extends HTMLElement {
         </div>
       `;
 
-      const focusPersonOnMap = () => {
-        const timeline = this.timelineByPerson.get(person.entity_id) || [];
-        if (timeline.length > 0 && this.map) {
-          const lastPt = toPoint(timeline[timeline.length - 1]);
-          if (lastPt) {
-            const targetZoom = Math.max(this.map.getZoom ? this.map.getZoom() : 15, 15);
-            if (typeof this.map.flyTo === "function") {
-              this.map.flyTo(lastPt, targetZoom, { duration: 0.5 });
-            } else if (typeof this.map.setView === "function") {
-              this.map.setView(lastPt, targetZoom);
-            }
-          }
-        }
-      };
+      const checkbox = row.querySelector(".person-active");
+      const colorPicker = row.querySelector(".color-picker");
 
-      row.querySelector(".person-avatar")?.addEventListener("click", focusPersonOnMap);
-      row.querySelector(".person-info")?.addEventListener("click", focusPersonOnMap);
-
-      row.querySelector(".person-active").addEventListener("change", async (event) => {
-        const isActive = event.target.checked;
+      const applyActiveChange = async (isActive) => {
         person.active = isActive;
+        row.classList.toggle("inactive", !isActive);
         try {
           await this._hass.callWS({
             type: "zeitachse/set_active_people",
@@ -1054,15 +1056,30 @@ class ZeitachsePanel extends HTMLElement {
           }
         } catch (error) {
           person.active = !isActive;
-          event.target.checked = person.active;
+          checkbox.checked = person.active;
+          row.classList.toggle("inactive", !person.active);
           console.error("[zeitachse-panel] Failed to update active people", error);
           this._showStatus(`Network error while updating active people: ${error?.message || error}`);
         }
         this._renderControls();
         this._refreshStaysAndPoi();
+      };
+
+      row.addEventListener("click", (event) => {
+        if (event.target === colorPicker || event.target === checkbox) return;
+        checkbox.checked = !checkbox.checked;
+        applyActiveChange(checkbox.checked);
       });
 
-      row.querySelector(".color-picker").addEventListener("change", async (event) => {
+      checkbox.addEventListener("change", (event) => {
+        applyActiveChange(event.target.checked);
+      });
+
+      colorPicker.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+
+      colorPicker.addEventListener("change", async (event) => {
         const previousColor = person.color;
         const nextColor = sanitizeColor(event.target.value, previousColor);
         const dot = row.querySelector(".dot");
@@ -1089,8 +1106,9 @@ class ZeitachsePanel extends HTMLElement {
         this._renderMap();
         this._renderStayList();
       });
-      controls.appendChild(row);
+      peopleList.appendChild(row);
     }
+    controls.appendChild(peopleList);
   }
 
   _buildStayPopupHtml(cluster, poi) {

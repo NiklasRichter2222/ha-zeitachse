@@ -652,8 +652,10 @@ export const setupTileLayer = (map, config = {}) => {
       maxZoom: provider.options.maxZoom || 19,
       subdomains: provider.options.subdomains || "abc",
       referrerPolicy: "origin",
-      updateWhenIdle: false,
-      keepBuffer: 3,
+      updateWhenIdle: true,
+      updateWhenZooming: false,
+      updateInterval: 200,
+      keepBuffer: 1,
     };
     const layer = window.L.tileLayer(tileUrl, tileOptions).addTo(map);
 
