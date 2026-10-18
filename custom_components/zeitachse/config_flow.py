@@ -195,6 +195,10 @@ class ZeitachseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 CONF_STAY_MIN_SNAPSHOTS: int(user_input[CONF_STAY_MIN_SNAPSHOTS]),
                 CONF_STAY_DISTANCE_METERS: int(user_input[CONF_STAY_DISTANCE_METERS]),
+                CONF_TILE_PROVIDER: user_input.get(
+                    CONF_TILE_PROVIDER, DEFAULT_TILE_PROVIDER
+                ),
+                CONF_TILE_URL: str(user_input.get(CONF_TILE_URL, "")).strip(),
                 CONF_ENCRYPTION_KEY: Fernet.generate_key().decode(),
             }
             return self.async_create_entry(title=user_input[CONF_NAME], data=data)
@@ -256,7 +260,15 @@ class ZeitachseOptionsFlow(config_entries.OptionsFlow):
                     ),
                     CONF_STAY_MIN_SNAPSHOTS: min_snapshots,
                     CONF_STAY_DISTANCE_METERS: distance_meters,
+                    CONF_TILE_PROVIDER: user_input.get(
+                        CONF_TILE_PROVIDER,
+                        merged.get(CONF_TILE_PROVIDER, DEFAULT_TILE_PROVIDER),
+                    ),
+                    CONF_TILE_URL: str(
+                        user_input.get(CONF_TILE_URL, merged.get(CONF_TILE_URL, ""))
+                    ).strip(),
                 },
             )
 
         return self.async_show_form(step_id="init", data_schema=_build_schema(merged, is_options_flow=True))
+

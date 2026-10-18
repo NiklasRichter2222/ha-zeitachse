@@ -20,6 +20,8 @@ from custom_components.zeitachse.const import (
     CONF_REPLACE_TRACKING_DATA,
     CONF_STAY_DISTANCE_METERS,
     CONF_STAY_MIN_SNAPSHOTS,
+    CONF_TILE_PROVIDER,
+    CONF_TILE_URL,
     CONF_TRACKED_PERSONS,
 )
 
@@ -124,6 +126,8 @@ async def test_options_flow_update():
         CONF_STAY_MIN_SNAPSHOTS: 4,
         CONF_STAY_DISTANCE_METERS: 50,
         CONF_REPLACE_TRACKING_DATA: False,
+        CONF_TILE_PROVIDER: "custom",
+        CONF_TILE_URL: "https://tiles.example.com/{z}/{x}/{y}.png",
     }
 
     result = await flow.async_step_init(user_input)
@@ -131,6 +135,8 @@ async def test_options_flow_update():
     assert result["data"][CONF_TRACKED_PERSONS] == ["person.alice", "person.bob"]
     assert result["data"][CONF_INTERVAL_MINUTES] == 10
     assert result["data"][CONF_ENABLE_DASHBOARD] is False
+    assert result["data"][CONF_TILE_PROVIDER] == "custom"
+    assert result["data"][CONF_TILE_URL] == "https://tiles.example.com/{z}/{x}/{y}.png"
 
 
 @pytest.mark.asyncio
@@ -202,3 +208,4 @@ async def test_options_flow_preload_pois():
         result = await flow.async_step_init(user_input)
         assert result["type"] == "create_entry"
         flow.hass.async_create_task.assert_called_once()
+

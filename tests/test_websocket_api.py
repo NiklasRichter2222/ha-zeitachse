@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -118,6 +118,7 @@ async def test_ws_list_people(mock_runtime):
     assert people[1]["active"] is False
     assert "map_settings" in args[1]
     assert args[1]["map_settings"]["tile_provider"] == "local_osm"
+    assert args[1]["map_settings"]["tile_token"] == mock_runtime.tile_token
 
 
 @pytest.mark.asyncio
@@ -146,7 +147,7 @@ async def test_ws_set_active_people(mock_runtime):
 
 @pytest.mark.asyncio
 async def test_ws_set_person_colors(mock_runtime):
-    """Test updating person colors."""
+    """Test updating person colors and rejecting invalid hex colors."""
     hass = MagicMock()
     hass.data = {RUNTIME_DATA_KEY: mock_runtime}
     mock_runtime.preferences.async_set_person_colors = AsyncMock()
@@ -164,6 +165,17 @@ async def test_ws_set_person_colors(mock_runtime):
         {"person.alice": "#00ff00"}, "user_123"
     )
     connection.send_result.assert_called_once_with(3, {"status": "ok"})
+
+    # Reject invalid / XSS color payload
+    bad_msg = {
+        "id": 31,
+        "type": "zeitachse/set_person_colors",
+        "person_colors": {"person.alice": '"><img src=x onerror=alert(1)>'},
+    }
+    await call_ws(ws_set_person_colors, hass, connection, bad_msg)
+    connection.send_error.assert_called_once_with(
+        31, "invalid_color", "Invalid hex color for person.alice"
+    )
 
 
 @pytest.mark.asyncio
@@ -224,8 +236,8 @@ async def test_ws_get_timeline_filtering(mock_runtime):
         "id": 5,
         "type": "zeitachse/get_timeline",
         "entity_id": "person.alice",
-        "start": datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc),
-        "end": datetime(2026, 1, 1, 11, 30, tzinfo=timezone.utc),
+        "start": datetime(2026, 1, 1, 10, 30, tzinfo=UTC),
+        "end": datetime(2026, 1, 1, 11, 30, tzinfo=UTC),
     }
     await call_ws(ws_get_timeline, hass, connection, msg)
 
@@ -258,7 +270,7 @@ async def test_ws_get_timeline_not_tracked(mock_runtime):
 
 @pytest.mark.asyncio
 async def test_ws_get_poi(mock_runtime):
-    """Test websocket POI lookup."""
+    """Test websocket POI lookup and coordinate bounds validation."""
     hass = MagicMock()
     hass.data = {RUNTIME_DATA_KEY: mock_runtime}
 
@@ -277,6 +289,34 @@ async def test_ws_get_poi(mock_runtime):
 
     connection.send_result.assert_called_once_with(
         7, {"poi": {"name": "Reichstag", "category": "tourism"}}
+    )
+
+    # Out of bounds latitude -> error
+    bad_coord_msg = {
+        "id": 71,
+        "type": "zeitachse/get_poi",
+        "latitude": 120.0,
+        "longitude": 13.3761,
+    }
+    await call_ws(ws_get_poi, hass, connection, bad_coord_msg)
+    connection.send_error.assert_called_once_with(
+        71, "invalid_coordinates", "Coordinates out of valid bounds"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ws_requires_authenticated_user(mock_runtime):
+    """Test websocket commands reject unauthenticated connections."""
+    hass = MagicMock()
+    hass.data = {RUNTIME_DATA_KEY: mock_runtime}
+
+    connection = MagicMock()
+    connection.user = None
+
+    msg = {"id": 99, "type": "zeitachse/list_people"}
+    await call_ws(ws_list_people, hass, connection, msg)
+    connection.send_error.assert_called_once_with(
+        99, "unauthorized", "Authentication required"
     )
 
 
@@ -310,3 +350,4 @@ async def test_ws_preload_pois(mock_runtime):
             "newly_fetched": 2,
         },
     )
+

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+import os
+import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiohttp import web
 
+from custom_components.zeitachse.const import RUNTIME_DATA_KEY
 from custom_components.zeitachse.tile_proxy import (
+    DISK_CACHE_TTL_SECONDS,
     TRANSPARENT_1X1_PNG,
     ZeitachseTileProxyView,
 )
@@ -46,10 +49,11 @@ async def test_tile_proxy_invalid_coordinates(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_tile_proxy_memory_cache(mock_hass):
-    """Test serving tile directly from memory cache."""
+async def test_tile_proxy_memory_cache_and_etag(mock_hass):
+    """Test serving tile directly from memory cache and 304 Not Modified on matching ETag."""
     view = ZeitachseTileProxyView(mock_hass)
     request = MagicMock()
+    request.headers = {}
 
     dummy_png = b"\x89PNG\r\n\x1a\n\x00test"
     view._memory_cache["10_500_500"] = dummy_png
@@ -58,6 +62,13 @@ async def test_tile_proxy_memory_cache(mock_hass):
     assert res.status == 200
     assert res.body == dummy_png
     assert res.headers.get("X-Zeitachse-Cache") == "MEMORY"
+    etag = res.headers.get("ETag")
+    assert etag is not None
+
+    # Conditional request with matching ETag returns 304
+    request.headers = {"If-None-Match": etag}
+    res_304 = await view.get(request, z="10", x="500", y="500.png")
+    assert res_304.status == 304
 
 
 @pytest.mark.asyncio
@@ -65,6 +76,7 @@ async def test_tile_proxy_disk_cache(mock_hass, tmp_path):
     """Test serving tile from disk cache when not in memory."""
     view = ZeitachseTileProxyView(mock_hass)
     request = MagicMock()
+    request.headers = {}
 
     dummy_png = b"\x89PNG\r\n\x1a\n\x00from_disk"
     tile_file = tmp_path / ".storage" / "zeitachse_tiles" / "10_500_500.png"
@@ -80,10 +92,88 @@ async def test_tile_proxy_disk_cache(mock_hass, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_tile_proxy_stale_disk_fallback_on_upstream_error(mock_hass, tmp_path):
+    """Test stale disk tile is still served when upstream refresh fails."""
+    view = ZeitachseTileProxyView(mock_hass)
+    request = MagicMock()
+    request.headers = {}
+
+    dummy_png = b"\x89PNG\r\n\x1a\n\x00stale_disk"
+    tile_file = tmp_path / ".storage" / "zeitachse_tiles" / "8_100_100.png"
+    tile_file.parent.mkdir(parents=True, exist_ok=True)
+    tile_file.write_bytes(dummy_png)
+    old_mtime = time.time() - (DISK_CACHE_TTL_SECONDS + 3600)
+    os.utime(tile_file, (old_mtime, old_mtime))
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 503
+    mock_resp.read.return_value = b""
+
+    class MockContextManager:
+        async def __aenter__(self):
+            return mock_resp
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = MockContextManager()
+
+    with patch(
+        "custom_components.zeitachse.tile_proxy.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        res = await view.get(request, z="8", x="100", y="100.png")
+        assert res.status == 200
+        assert res.body == dummy_png
+        assert res.headers.get("X-Zeitachse-Cache") == "DISK"
+
+
+@pytest.mark.asyncio
+async def test_tile_proxy_authentication(mock_hass):
+    """Test tile proxy enforces authentication when runtime tile_token is present."""
+    mock_hass.data = {
+        RUNTIME_DATA_KEY: SimpleNamespace(tile_token="secret-tile-token-123")
+    }
+    view = ZeitachseTileProxyView(mock_hass)
+    dummy_png = b"\x89PNG\r\n\x1a\n\x00auth_test"
+    view._memory_cache["5_1_1"] = dummy_png
+
+    # Unauthenticated request without hass_user or token -> 401
+    unauth_req = SimpleNamespace(
+        get=lambda _k, _d=None: None,
+        query={},
+        headers={},
+    )
+    res_unauth = await view.get(unauth_req, z="5", x="1", y="1.png")
+    assert res_unauth.status == 401
+
+    # Request with valid token query param -> 200
+    token_req = SimpleNamespace(
+        get=lambda _k, _d=None: None,
+        query={"token": "secret-tile-token-123"},
+        headers={},
+    )
+    res_token = await view.get(token_req, z="5", x="1", y="1.png")
+    assert res_token.status == 200
+    assert res_token.body == dummy_png
+
+    # Request with authenticated hass_user -> 200
+    user_req = SimpleNamespace(
+        get=lambda k, _d=None: SimpleNamespace(id="u1") if k == "hass_user" else None,
+        query={},
+        headers={},
+    )
+    res_user = await view.get(user_req, z="5", x="1", y="1.png")
+    assert res_user.status == 200
+
+
+@pytest.mark.asyncio
 async def test_tile_proxy_fetch_upstream(mock_hass):
     """Test fetching tile from upstream server and caching it."""
     view = ZeitachseTileProxyView(mock_hass)
     request = MagicMock()
+    request.headers = {}
 
     dummy_png = b"\x89PNG\r\n\x1a\n\x00fetched"
 
@@ -117,6 +207,7 @@ async def test_tile_proxy_fallback_on_failure(mock_hass):
     """Test returning transparent 1x1 fallback PNG when upstream fails."""
     view = ZeitachseTileProxyView(mock_hass)
     request = MagicMock()
+    request.headers = {}
 
     mock_resp = AsyncMock()
     mock_resp.status = 404
@@ -168,5 +259,15 @@ def test_frontend_assets_integrity():
     assert "calculateBearing" in map_utils
     assert "compassHeading" in map_utils
     assert "createDirectionArrowIcon" in map_utils
+    assert "updateOverlapCulledTooltips" in map_utils
+    assert "getSharedCanvasRenderer" in map_utils
+    assert "sanitizeColor" in map_utils
     assert "/api/zeitachse/tiles/" in map_utils
+
+    panel_js = (frontend_dir / "zeitachse-panel.js").read_text(encoding="utf-8")
+    assert "_focusStayOnMap" in panel_js
+    assert "theme-dark" in panel_js
+    assert "theme-light" in panel_js
+    assert "updateOverlapCulledTooltips" in panel_js
+
 

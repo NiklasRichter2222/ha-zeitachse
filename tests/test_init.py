@@ -86,6 +86,43 @@ async def test_tracking_manager_snapshot_collection():
 
 
 @pytest.mark.asyncio
+async def test_tracking_manager_batch_snapshot_collection():
+    """Test TrackingManager batches multiple snapshots via async_append_many."""
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.options = {}
+    entry.data = {
+        CONF_TRACKED_PERSONS: ["person.alice", "person.bob"],
+        CONF_INTERVAL_MINUTES: 5,
+    }
+
+    storage = MagicMock()
+    storage.async_append_many = AsyncMock()
+    storage.async_append = AsyncMock()
+
+    alice_state = MagicMock()
+    alice_state.state = "home"
+    alice_state.attributes = {"latitude": 52.52, "longitude": 13.40}
+
+    bob_state = MagicMock()
+    bob_state.state = "work"
+    bob_state.attributes = {"latitude": 52.50, "longitude": 13.35}
+
+    hass.states.get.side_effect = (
+        lambda eid: alice_state if eid == "person.alice" else bob_state
+    )
+
+    manager = TrackingManager(hass, entry, storage)
+    await manager._async_collect_snapshot()
+
+    storage.async_append_many.assert_awaited_once()
+    batch = storage.async_append_many.call_args[0][0]
+    assert "person.alice" in batch
+    assert "person.bob" in batch
+    storage.async_append.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_tracking_manager_start_and_stop():
     """Test starting and stopping tracking timer."""
     hass = MagicMock()
@@ -160,3 +197,4 @@ async def test_async_setup_and_unload_entry():
         assert unload_success is True
         mock_stop.assert_awaited_once()
         assert entry.entry_id not in hass.data[DOMAIN]
+

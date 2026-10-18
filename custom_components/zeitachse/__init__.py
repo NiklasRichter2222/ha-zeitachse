@@ -75,6 +75,7 @@ class TrackingManager:
             now,
             len(tracked_persons),
         )
+        batch: dict[str, dict[str, Any]] = {}
         for person_entity_id in tracked_persons:
             state = self._hass.states.get(person_entity_id)
             if state is None:
@@ -91,23 +92,36 @@ class TrackingManager:
                 )
                 continue
 
-            snapshot = {
+            batch[person_entity_id] = {
                 "timestamp": now,
                 "latitude": latitude,
                 "longitude": longitude,
                 "state": state.state,
             }
+
+        if len(batch) > 1 and inspect.iscoroutinefunction(
+            getattr(self._storage, "async_append_many", None)
+        ):
             try:
-                await self._storage.async_append(person_entity_id, snapshot)
-                stored_count += 1
-                _LOGGER.debug(
-                    "Stored snapshot for %s with state '%s'",
-                    person_entity_id,
-                    state.state,
-                )
+                stored_count = await self._storage.async_append_many(batch)
             except Exception:
-                failed_count += 1
-                _LOGGER.exception("Failed to store snapshot for %s", person_entity_id)
+                failed_count += len(batch)
+                _LOGGER.exception("Failed to store batch snapshots")
+        else:
+            for person_entity_id, snapshot in batch.items():
+                try:
+                    await self._storage.async_append(person_entity_id, snapshot)
+                    stored_count += 1
+                    _LOGGER.debug(
+                        "Stored snapshot for %s with state '%s'",
+                        person_entity_id,
+                        snapshot["state"],
+                    )
+                except Exception:
+                    failed_count += 1
+                    _LOGGER.exception(
+                        "Failed to store snapshot for %s", person_entity_id
+                    )
 
         _LOGGER.debug(
             "Finished Zeitachse snapshot collection at %s: stored=%d, failed=%d",
@@ -293,3 +307,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload on options update."""
     await hass.config_entries.async_reload(entry.entry_id)
+

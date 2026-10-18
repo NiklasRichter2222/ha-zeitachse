@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
+import secrets
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
+from .config_flow import _is_valid_hex_color
 from .const import (
     COLOR_PALETTE,
     CONF_PERSON_COLORS,
@@ -63,6 +66,18 @@ def _to_utc_datetime(val: Any) -> datetime | None:
     return None
 
 
+def _require_authenticated_user(
+    connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> bool:
+    """Ensure connection has an authenticated Home Assistant user."""
+    if getattr(connection, "user", None) is None:
+        connection.send_error(
+            msg["id"], "unauthorized", "Authentication required"
+        )
+        return False
+    return True
+
+
 class ZeitachseRuntimeData:
     """Runtime objects used by websocket commands."""
 
@@ -78,6 +93,7 @@ class ZeitachseRuntimeData:
         self.snapshot_storage = snapshot_storage
         self.preferences = preferences
         self.poi_lookup = poi_lookup
+        self.tile_token = secrets.token_urlsafe(24)
 
     @property
     def tracked_persons(self) -> list[str]:
@@ -135,6 +151,9 @@ async def ws_list_people(
     msg: dict[str, Any],
 ) -> None:
     """List tracked people and user preferences."""
+    if not _require_authenticated_user(connection, msg):
+        return
+
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     entry = runtime.config_entry
     configured_people = entry.options.get(
@@ -157,7 +176,10 @@ async def ws_list_people(
         )
     )
     custom_colors = prefs.get("person_colors", {})
-    color_mapping.update(custom_colors)
+    if isinstance(custom_colors, dict):
+        for k, v in custom_colors.items():
+            if _is_valid_hex_color(v):
+                color_mapping[k] = v
 
     stay_settings = prefs.get("stay_settings", {})
 
@@ -165,21 +187,44 @@ async def ws_list_people(
     for idx, entity_id in enumerate(configured_people):
         state = hass.states.get(entity_id)
         name = entity_id
+        person_state_str = None
+        last_changed_iso = None
+        entity_picture = None
         if state is not None:
             name = (
                 state.attributes.get("friendly_name")
                 or state.name
                 or entity_id
             )
-        color = color_mapping.get(entity_id) or COLOR_PALETTE[idx % len(COLOR_PALETTE)]
-        people.append(
-            {
-                "entity_id": entity_id,
-                "name": name,
-                "color": color,
-                "active": entity_id in active_set,
-            }
+            if isinstance(getattr(state, "state", None), str):
+                person_state_str = state.state
+            last_changed = getattr(state, "last_changed", None) or getattr(
+                state, "last_updated", None
+            )
+            if isinstance(last_changed, datetime):
+                last_changed_iso = last_changed.isoformat()
+            pic = state.attributes.get("entity_picture")
+            if isinstance(pic, str) and pic.startswith(("/", "http://", "https://")):
+                entity_picture = pic
+        raw_color = color_mapping.get(entity_id)
+        color = (
+            raw_color
+            if _is_valid_hex_color(raw_color)
+            else COLOR_PALETTE[idx % len(COLOR_PALETTE)]
         )
+        person_item: dict[str, Any] = {
+            "entity_id": entity_id,
+            "name": name,
+            "color": color,
+            "active": entity_id in active_set,
+        }
+        if person_state_str is not None:
+            person_item["state"] = person_state_str
+        if last_changed_iso is not None:
+            person_item["last_changed"] = last_changed_iso
+        if entity_picture is not None:
+            person_item["entity_picture"] = entity_picture
+        people.append(person_item)
 
     connection.send_result(
         msg["id"],
@@ -214,6 +259,7 @@ async def ws_list_people(
                     CONF_TILE_URL,
                     entry.data.get(CONF_TILE_URL, ""),
                 ),
+                "tile_token": runtime.tile_token,
             },
         },
     )
@@ -232,6 +278,8 @@ async def ws_set_active_people(
     msg: dict[str, Any],
 ) -> None:
     """Set active person filters for UI."""
+    if not _require_authenticated_user(connection, msg):
+        return
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     user_id = connection.user.id if connection.user else None
     active_people = msg["active_people"]
@@ -254,11 +302,21 @@ async def ws_set_person_colors(
     msg: dict[str, Any],
 ) -> None:
     """Set custom color palette for persons."""
+    if not _require_authenticated_user(connection, msg):
+        return
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     user_id = connection.user.id if connection.user else None
-    person_colors = msg["person_colors"]
+    raw_colors = msg["person_colors"]
+    sanitized_colors: dict[str, str] = {}
+    for entity_id, color in raw_colors.items():
+        if not _is_valid_hex_color(color):
+            connection.send_error(
+                msg["id"], "invalid_color", f"Invalid hex color for {entity_id}"
+            )
+            return
+        sanitized_colors[entity_id] = color
     await _maybe_await(
-        runtime.preferences.async_set_person_colors(person_colors, user_id)
+        runtime.preferences.async_set_person_colors(sanitized_colors, user_id)
     )
     connection.send_result(msg["id"], {"status": "ok"})
 
@@ -281,6 +339,8 @@ async def ws_set_stay_settings(
     msg: dict[str, Any],
 ) -> None:
     """Set custom stay detection thresholds for UI."""
+    if not _require_authenticated_user(connection, msg):
+        return
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     user_id = connection.user.id if connection.user else None
     min_snapshots = msg["min_snapshots"]
@@ -308,6 +368,8 @@ async def ws_get_timeline(
     msg: dict[str, Any],
 ) -> None:
     """Get location history timeline for a tracked person."""
+    if not _require_authenticated_user(connection, msg):
+        return
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     entity_id = msg["entity_id"]
     if entity_id not in runtime.tracked_persons:
@@ -357,10 +419,22 @@ async def ws_get_poi(
     msg: dict[str, Any],
 ) -> None:
     """Get POI information for one coordinate."""
+    if not _require_authenticated_user(connection, msg):
+        return
+    lat = msg["latitude"]
+    lon = msg["longitude"]
+    if (
+        not math.isfinite(lat)
+        or not math.isfinite(lon)
+        or not (-90.0 <= lat <= 90.0)
+        or not (-180.0 <= lon <= 180.0)
+    ):
+        connection.send_error(
+            msg["id"], "invalid_coordinates", "Coordinates out of valid bounds"
+        )
+        return
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
-    poi = await _maybe_await(
-        runtime.poi_lookup.async_lookup(msg["latitude"], msg["longitude"])
-    )
+    poi = await _maybe_await(runtime.poi_lookup.async_lookup(lat, lon))
     connection.send_result(msg["id"], {"poi": poi})
 
 
@@ -372,6 +446,8 @@ async def ws_preload_pois(
     msg: dict[str, Any],
 ) -> None:
     """Preload and persist POIs for all stay locations."""
+    if not _require_authenticated_user(connection, msg):
+        return
     runtime: ZeitachseRuntimeData = hass.data[RUNTIME_DATA_KEY]
     prefs = await _maybe_await(runtime.preferences.async_load())
     if not isinstance(prefs, dict):
@@ -413,3 +489,4 @@ async def async_register_websocket_api(
     websocket_api.async_register_command(hass, ws_get_timeline)
     websocket_api.async_register_command(hass, ws_get_poi)
     websocket_api.async_register_command(hass, ws_preload_pois)
+

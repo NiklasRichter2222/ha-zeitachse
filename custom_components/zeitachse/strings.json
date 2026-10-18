@@ -15,6 +15,8 @@
           "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Stay detection: minimum snapshots",
           "stay_distance_meters": "Stay detection: distance tolerance (meters)",
+          "tile_provider": "Map tile provider / basemap",
+          "tile_url": "Custom tile URL (only when provider is 'Custom')",
           "replace_tracking_data": "Replace all saved timeline data on save"
         }
       }
@@ -33,9 +35,13 @@
           "person_colors": "Person colors (JSON map: entity_id -> #RRGGBB)",
           "stay_min_snapshots": "Stay detection: minimum snapshots",
           "stay_distance_meters": "Stay detection: distance tolerance (meters)",
+          "tile_provider": "Map tile provider / basemap",
+          "tile_url": "Custom tile URL (only when provider is 'Custom')",
+          "preload_pois": "Preload all POI names & addresses in the background now",
           "replace_tracking_data": "Replace all saved timeline data on save"
         }
       }
     }
   }
 }
+

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -29,9 +31,20 @@ class EncryptedSnapshotStorage:
         self._file_path = hass.config.path(file_path)
         self._fernet = Fernet(encryption_key.encode())
         self._cache: dict[str, list[dict[str, Any]]] | None = None
+        self._lock = asyncio.Lock()
 
     async def async_load(self) -> dict[str, list[dict[str, Any]]]:
         """Load encrypted snapshots."""
+        if self._cache is not None:
+            return self._cache
+
+        async with self._lock:
+            if self._cache is not None:
+                return self._cache
+            return await self._async_load_unlocked()
+
+    async def _async_load_unlocked(self) -> dict[str, list[dict[str, Any]]]:
+        """Load encrypted snapshots while holding lock."""
         if self._cache is not None:
             return self._cache
 
@@ -58,12 +71,32 @@ class EncryptedSnapshotStorage:
         self, person_entity_id: str, snapshot: dict[str, Any]
     ) -> None:
         """Append a snapshot and persist encrypted payload."""
-        data = await self.async_load()
-        snapshots = data.setdefault(person_entity_id, [])
-        snapshots.append(snapshot)
-        if len(snapshots) > MAX_SNAPSHOTS_PER_PERSON:
-            del snapshots[:-MAX_SNAPSHOTS_PER_PERSON]
-        await self._async_persist(data)
+        async with self._lock:
+            data = await self._async_load_unlocked()
+            snapshots = data.setdefault(person_entity_id, [])
+            snapshots.append(snapshot)
+            if len(snapshots) > MAX_SNAPSHOTS_PER_PERSON:
+                del snapshots[:-MAX_SNAPSHOTS_PER_PERSON]
+            await self._async_persist(data)
+
+    async def async_append_many(
+        self, snapshots_by_person: Mapping[str, dict[str, Any]]
+    ) -> int:
+        """Append snapshots for multiple people in a single encrypted disk write."""
+        if not snapshots_by_person:
+            return 0
+        async with self._lock:
+            data = await self._async_load_unlocked()
+            count = 0
+            for person_entity_id, snapshot in snapshots_by_person.items():
+                snapshots = data.setdefault(person_entity_id, [])
+                snapshots.append(snapshot)
+                if len(snapshots) > MAX_SNAPSHOTS_PER_PERSON:
+                    del snapshots[:-MAX_SNAPSHOTS_PER_PERSON]
+                count += 1
+            if count > 0:
+                await self._async_persist(data)
+            return count
 
     async def async_get_person_timeline(
         self, person_entity_id: str
@@ -74,13 +107,14 @@ class EncryptedSnapshotStorage:
 
     async def async_replace(self, data: dict[str, list[dict[str, Any]]]) -> None:
         """Replace complete snapshot payload and persist it."""
-        normalized = {
-            key: value if isinstance(value, list) else []
-            for key, value in data.items()
-            if isinstance(key, str)
-        }
-        self._cache = normalized
-        await self._async_persist(normalized)
+        async with self._lock:
+            normalized = {
+                key: value if isinstance(value, list) else []
+                for key, value in data.items()
+                if isinstance(key, str)
+            }
+            self._cache = normalized
+            await self._async_persist(normalized)
 
     async def _async_persist(self, data: dict[str, list[dict[str, Any]]]) -> None:
         """Persist snapshot payload encrypted on disk with secure permissions."""
@@ -91,7 +125,7 @@ class EncryptedSnapshotStorage:
 
         def _write_secure() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = path.with_suffix(".tmp")
+            tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
             tmp_path.write_bytes(encrypted)
             try:
                 tmp_path.chmod(0o600)
@@ -111,6 +145,7 @@ class UserPreferenceStorage:
             hass, PREFERENCES_STORAGE_VERSION, PREFERENCES_STORAGE_KEY
         )
         self._cache: dict[str, dict[str, Any]] | None = None
+        self._lock = asyncio.Lock()
 
     async def async_load(self) -> dict[str, dict[str, Any]]:
         """Load preferences."""
@@ -131,12 +166,13 @@ class UserPreferenceStorage:
         self, user_id: str | None, values: Mapping[str, Any]
     ) -> None:
         """Persist one user's preferences."""
-        prefs = await self.async_load()
-        key = user_id or "global"
-        current = dict(prefs.get(key, {}))
-        current.update(dict(values))
-        prefs[key] = current
-        await self._store.async_save(prefs)
+        async with self._lock:
+            prefs = await self.async_load()
+            key = user_id or "global"
+            current = dict(prefs.get(key, {}))
+            current.update(dict(values))
+            prefs[key] = current
+            await self._store.async_save(prefs)
 
     async def async_set_active_people(
         self, active_people: list[str], user_id: str | None = None
@@ -163,3 +199,4 @@ class UserPreferenceStorage:
                 }
             },
         )
+

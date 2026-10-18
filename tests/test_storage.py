@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +22,7 @@ def mock_hass(tmp_path: Path):
     hass.config.path.side_effect = lambda rel: str(tmp_path / rel)
 
     async def _mock_executor(func, *args):
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return await func(*args)
         return func(*args)
 
@@ -146,3 +146,4 @@ async def test_user_preference_storage(mock_hass):
             "user_2": {"active_people": ["person.bob"]},
         }
     )
+

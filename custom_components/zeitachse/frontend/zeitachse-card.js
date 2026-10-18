@@ -3,20 +3,22 @@ import {
   BASEMAP_PROVIDERS,
   clusterStays,
   ensureLeafletLoaded,
+  getSharedCanvasRenderer,
   haversineMeters,
   pointKey,
   renderTimelineTrack,
+  sanitizeColor,
   setupTileLayer,
   simplifyPoints,
   toPoint,
   toTimestamp,
+  toTimestampMs,
+  updateOverlapCulledTooltips,
 } from "./map-utils.js";
 
 const DEFAULT_MAP_CENTER = [51.1657, 10.4515];
 const DEFAULT_MAP_ZOOM = 6;
 const DEFAULT_TIMELINE_HEIGHT_ROWS = 2;
-const LEAFLET_WAIT_MAX_ATTEMPTS = 10;
-const LEAFLET_WAIT_DELAY_MS = 500;
 const RANGE_OPTIONS = ["1h", "1d", "1w", "1m", "1y"];
 const RANGE_LABELS = {
   "1h": "1h",
@@ -27,10 +29,17 @@ const RANGE_LABELS = {
 };
 const RANGE_TOLERANCE_METERS = {
   "1h": 2,
-  "1d": 3,
-  "1w": 6,
-  "1m": 12,
-  "1y": 25,
+  "1d": 4,
+  "1w": 10,
+  "1m": 25,
+  "1y": 60,
+};
+const RANGE_MAX_TRACK_POINTS = {
+  "1h": 1500,
+  "1d": 2000,
+  "1w": 2200,
+  "1m": 2500,
+  "1y": 2800,
 };
 const DEFAULT_STAY_DISTANCE_METERS = 75;
 const DEFAULT_STAY_MIN_SNAPSHOTS = 6;
@@ -40,7 +49,7 @@ const MIN_STAY_MIN_SNAPSHOTS = 2;
 const MAX_STAY_MIN_SNAPSHOTS = 500;
 
 function escapeHtml(value) {
-  return String(value)
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -95,12 +104,6 @@ function groupStaysByPeriod(stays, selectedRange) {
   return Array.from(groups.values());
 }
 
-function pointKey(point) {
-  if (!Array.isArray(point) || point.length !== 2) return "";
-  const [lat, lon] = point;
-  return `${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
-}
-
 function normalizeRange(value) {
   return RANGE_OPTIONS.includes(value) ? value : "1d";
 }
@@ -151,6 +154,7 @@ class ZeitachseBaseCard extends HTMLElement {
     if (!this.shadowRoot.innerHTML) {
       this._renderShell();
     }
+    this._syncTheme();
     if (!this._loaded && this._hass) {
       this._loaded = true;
       this._load().catch((error) => {
@@ -158,6 +162,24 @@ class ZeitachseBaseCard extends HTMLElement {
         this._showStatus(`Loading failed: ${error?.message || error}`);
       });
     }
+  }
+
+  _resolveIsDark() {
+    if (typeof this._hass?.themes?.darkMode === "boolean") {
+      return this._hass.themes.darkMode;
+    }
+    if (typeof window !== "undefined" && window.matchMedia) {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+    return true;
+  }
+
+  _syncTheme() {
+    const card = this.shadowRoot?.querySelector("ha-card");
+    if (!card) return;
+    const isDark = this._resolveIsDark();
+    card.classList.toggle("theme-dark", isDark);
+    card.classList.toggle("theme-light", !isDark);
   }
 
   setConfig(config) {
@@ -224,9 +246,15 @@ class ZeitachseBaseCard extends HTMLElement {
     if (!this._hass) return;
     const result = await this._hass.callWS({ type: "zeitachse/list_people" });
     this.staySettings = this._normalizeStaySettings(result.stay_settings);
-    this.people = this._resolvePeople(result.people || []);
+    this.mapSettings = result.map_settings || {};
+    this.people = this._resolvePeople(
+      (result.people || []).map((p) => ({
+        ...p,
+        color: sanitizeColor(p.color),
+      }))
+    );
     await this._loadTimelines();
-    await this._refreshStaysAndPoi();
+    this._refreshStaysAndPoi();
     this._showStatus(this.people.length ? "Aktive Zeitachse" : "Keine passenden Personen gefunden");
   }
 
@@ -250,41 +278,66 @@ class ZeitachseBaseCard extends HTMLElement {
     const minSnapshots = this.staySettings?.min_snapshots ?? DEFAULT_STAY_MIN_SNAPSHOTS;
     const distanceMeters = this.staySettings?.distance_meters ?? DEFAULT_STAY_DISTANCE_METERS;
     for (const person of this.people) {
-      const timeline = [...(this.timelineByPerson.get(person.entity_id) || [])].sort((first, second) => {
-        const firstTs = toTimestamp(first);
-        const secondTs = toTimestamp(second);
-        return (firstTs?.getTime() || 0) - (secondTs?.getTime() || 0);
-      });
-      if (timeline.length < 2) continue;
+      const rawTimeline = this.timelineByPerson.get(person.entity_id) || [];
+      if (rawTimeline.length < 2) continue;
+
+      const parsed = [];
+      let isSorted = true;
+      let prevMs = -Infinity;
+      for (let i = 0; i < rawTimeline.length; i += 1) {
+        const entry = rawTimeline[i];
+        const point = toPoint(entry);
+        if (!point) continue;
+        const tsMs = toTimestampMs(entry);
+        if (Number.isNaN(tsMs)) continue;
+        if (tsMs < prevMs) isSorted = false;
+        prevMs = tsMs;
+        parsed.push({ point, tsMs });
+      }
+      if (parsed.length < 2) continue;
+      if (!isSorted) {
+        parsed.sort((a, b) => a.tsMs - b.tsMs);
+      }
 
       let current = null;
-      for (const entry of timeline) {
-        const point = toPoint(entry);
-        const timestamp = toTimestamp(entry);
-        if (!point || !timestamp) continue;
-
+      for (let i = 0; i < parsed.length; i += 1) {
+        const { point, tsMs } = parsed[i];
         if (!current) {
-          current = { person, point, start: timestamp, end: timestamp, samples: 1 };
+          current = { person, point, startMs: tsMs, endMs: tsMs, samples: 1 };
           continue;
         }
 
         if (haversineMeters(current.point, point) <= distanceMeters) {
-          current.end = timestamp;
+          current.endMs = tsMs;
           current.samples += 1;
           continue;
         }
 
-        const durationMs = current.end.getTime() - current.start.getTime();
+        const durationMs = current.endMs - current.startMs;
         if (current.samples >= minSnapshots) {
-          stays.push({ ...current, durationMs });
+          stays.push({
+            person: current.person,
+            point: current.point,
+            start: new Date(current.startMs),
+            end: new Date(current.endMs),
+            samples: current.samples,
+            durationMs,
+          });
         }
-        current = { person, point, start: timestamp, end: timestamp, samples: 1 };
+        current = { person, point, startMs: tsMs, endMs: tsMs, samples: 1 };
       }
 
       if (current) {
-        const durationMs = current.end.getTime() - current.start.getTime();
+        const durationMs = current.endMs - current.startMs;
         if (current.samples >= minSnapshots) {
-          stays.push({ ...current, durationMs });
+          stays.push({
+            person: current.person,
+            point: current.point,
+            start: new Date(current.startMs),
+            end: new Date(current.endMs),
+            samples: current.samples,
+            durationMs,
+          });
         }
       }
     }
@@ -301,10 +354,17 @@ class ZeitachseBaseCard extends HTMLElement {
     this._loadPoiForClusters(this.stayClusters);
   }
 
+  _onPoiResolved(_key, _poi) {
+    this._renderData();
+  }
+
   async _loadPoiForClusters(clusters) {
     const version = ++this._poiLookupVersion;
     const missing = new Map();
-    for (const cluster of clusters) {
+    const prioritized = [...clusters].sort(
+      (a, b) => (b.totalDurationMs || 0) - (a.totalDurationMs || 0)
+    );
+    for (const cluster of prioritized) {
       const key = pointKey(cluster.point);
       if (!key || this.poiByPoint.has(key) || missing.has(key)) continue;
       missing.set(key, cluster.point);
@@ -321,8 +381,9 @@ class ZeitachseBaseCard extends HTMLElement {
           longitude,
         });
         if (version !== this._poiLookupVersion) return;
-        this.poiByPoint.set(key, result?.poi || null);
-        this._renderData();
+        const poi = result?.poi || null;
+        this.poiByPoint.set(key, poi);
+        this._onPoiResolved(key, poi);
       } catch (_error) {
         if (version !== this._poiLookupVersion) return;
         this.poiByPoint.set(key, null);
@@ -345,10 +406,22 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
     super();
     this.map = null;
     this.layers = [];
+    this.stayMarkers = [];
     this._mapInitFailed = false;
     this._defaultCenter = [...DEFAULT_MAP_CENTER];
     this._defaultZoom = DEFAULT_MAP_ZOOM;
     this._interactive = true;
+    this._onExternalFocusStay = (event) => {
+      const point = event?.detail?.point;
+      if (point && this.map) {
+        const targetZoom = Math.max(this.map.getZoom ? this.map.getZoom() : 14, 16);
+        if (typeof this.map.flyTo === "function") {
+          this.map.flyTo(point, targetZoom, { duration: 0.6 });
+        } else if (typeof this.map.setView === "function") {
+          this.map.setView(point, targetZoom);
+        }
+      }
+    };
   }
 
   static getConfigElement() {
@@ -365,7 +438,12 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
     };
   }
 
+  connectedCallback() {
+    window.addEventListener("zeitachse-focus-stay", this._onExternalFocusStay);
+  }
+
   disconnectedCallback() {
+    window.removeEventListener("zeitachse-focus-stay", this._onExternalFocusStay);
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
   }
@@ -384,44 +462,71 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
   _renderShell() {
     this.shadowRoot.innerHTML = `
       <style>
-        ha-card { padding: 12px; }
-        .status { margin-bottom: 10px; color: var(--secondary-text-color); }
-        #map { height: 420px; border-radius: 8px; }
+        ha-card {
+          --zeitachse-map-bg: #141414;
+          --zeitachse-surface: rgba(28, 28, 28, 0.92);
+          --zeitachse-surface-elevated: #242424;
+          --zeitachse-surface-hover: rgba(255, 255, 255, 0.06);
+          --zeitachse-text: #e1e1e1;
+          --zeitachse-text-secondary: #9b9b9b;
+          --zeitachse-border: rgba(255, 255, 255, 0.1);
+          --zeitachse-accent: var(--primary-color, #03a9f4);
+          --zeitachse-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+          --zeitachse-tooltip-bg: rgba(28, 28, 28, 0.94);
+          --zeitachse-tooltip-text: #f1f1f1;
+          padding: 12px;
+        }
+        ha-card.theme-light {
+          --zeitachse-map-bg: #e5e3df;
+          --zeitachse-surface: rgba(255, 255, 255, 0.93);
+          --zeitachse-surface-elevated: #ffffff;
+          --zeitachse-surface-hover: rgba(0, 0, 0, 0.05);
+          --zeitachse-text: #1c1c1e;
+          --zeitachse-text-secondary: #636366;
+          --zeitachse-border: rgba(0, 0, 0, 0.1);
+          --zeitachse-accent: var(--primary-color, #0088cc);
+          --zeitachse-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+          --zeitachse-tooltip-bg: rgba(255, 255, 255, 0.95);
+          --zeitachse-tooltip-text: #1c1c1e;
+        }
+        .status { margin-bottom: 8px; color: var(--secondary-text-color); font-size: 0.85rem; }
+        #map { height: 420px; border-radius: 12px; overflow: hidden; border: 1px solid var(--zeitachse-border); }
         .legend {
           margin-top: 10px;
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          padding: 8px;
+          border: 1px solid var(--divider-color, var(--zeitachse-border));
+          border-radius: 10px;
+          padding: 8px 12px;
         }
-        .legend-title { font-weight: 600; margin-bottom: 6px; }
-        .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .legend-title { font-weight: 600; margin-bottom: 6px; font-size: 0.88rem; }
+        .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 0.86rem; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; }
         .leaflet-tooltip.zeitachse-poi-label {
           position: absolute !important;
-          background: rgba(24, 24, 27, 0.88) !important;
-          color: #ffffff !important;
-          border: 1px solid rgba(255, 255, 255, 0.25) !important;
-          border-radius: 6px !important;
+          background: var(--zeitachse-tooltip-bg) !important;
+          color: var(--zeitachse-tooltip-text) !important;
+          border: 1px solid var(--zeitachse-border) !important;
+          border-radius: 8px !important;
           padding: 3px 8px !important;
           font-size: 11px !important;
-          font-weight: 500 !important;
+          font-weight: 600 !important;
           white-space: nowrap !important;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45) !important;
+          box-shadow: var(--zeitachse-shadow) !important;
           pointer-events: none !important;
-          backdrop-filter: blur(6px) !important;
-          -webkit-backdrop-filter: blur(6px) !important;
+          backdrop-filter: blur(8px) !important;
+          -webkit-backdrop-filter: blur(8px) !important;
         }
         .leaflet-tooltip-top:before {
-          border-top-color: rgba(24, 24, 27, 0.88) !important;
+          border-top-color: var(--zeitachse-tooltip-bg) !important;
         }
         ${LEAFLET_SHADOW_CSS}
       </style>
-      <ha-card>
+      <ha-card class="theme-dark">
         <div class="status" id="status">Zeitachse lädt…</div>
         <div id="map"></div>
         <div class="legend" id="legend"></div>
       </ha-card>
     `;
+    this._syncTheme();
   }
 
   async _waitForLeaflet() {
@@ -447,8 +552,13 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
         boxZoom: this._interactive,
         keyboard: this._interactive,
         touchZoom: this._interactive,
-        zoomControl: this._interactive,
+        zoomControl: false,
       }).setView(this._defaultCenter, this._defaultZoom);
+
+      if (this._interactive && window.L.control?.zoom) {
+        window.L.control.zoom({ position: "topright" }).addTo(this.map);
+      }
+
       this._tileController = setupTileLayer(this.map, {
         provider: this.config?.tile_provider || "local_osm",
         url: this.config?.tile_url,
@@ -458,9 +568,12 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       this.map.on("zoomend", () => {
         this._updateTooltipsVisibility();
       });
+      this.map.on("moveend", () => {
+        this._updateTooltipsVisibility();
+      });
 
       requestAnimationFrame(() => this.map?.invalidateSize(false));
-      
+
       let resizeScheduled = false;
       this._resizeObserver = new ResizeObserver(() => {
         if (!resizeScheduled) {
@@ -469,6 +582,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
             resizeScheduled = false;
             if (this.map) {
               this.map.invalidateSize(false);
+              this._updateTooltipsVisibility();
             }
           });
         }
@@ -491,11 +605,46 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       return;
     }
     await super._load();
+    if (this._tileController && !this.config?.tile_provider && this.mapSettings) {
+      this._tileController.setProvider(
+        this.mapSettings.tile_provider || "local_osm",
+        this.mapSettings.tile_url || null,
+        this.mapSettings.tile_token || null
+      );
+    } else if (this._tileController && this.mapSettings?.tile_token) {
+      this._tileController.setProvider(
+        this.config?.tile_provider || "local_osm",
+        this.config?.tile_url || null,
+        this.mapSettings.tile_token
+      );
+    }
   }
 
   _renderData() {
     this._renderMap();
     this._renderLegend();
+  }
+
+  _onPoiResolved(key, poi) {
+    if (!poi?.name) return;
+    for (const marker of this.stayMarkers || []) {
+      if (marker._pointKey === key) {
+        marker._labelText = poi.name;
+        marker._labelWidth = null;
+        marker._labelHeight = null;
+        if (!marker.getTooltip()) {
+          marker.bindTooltip(escapeHtml(poi.name), {
+            permanent: true,
+            direction: "top",
+            offset: [0, -8],
+            className: "zeitachse-poi-label",
+          });
+        } else {
+          marker.setTooltipContent(escapeHtml(poi.name));
+        }
+      }
+    }
+    this._updateTooltipsVisibility();
   }
 
   _renderLegend() {
@@ -510,7 +659,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       ${this.people
         .map(
           (person) =>
-            `<div class="legend-item"><span class="dot" style="background:${person.color}"></span><span>${escapeHtml(person.name)}</span></div>`
+            `<div class="legend-item"><span class="dot" style="background:${sanitizeColor(person.color)}"></span><span>${escapeHtml(person.name)}</span></div>`
         )
         .join("")}
     `;
@@ -529,6 +678,10 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
     this.layers = [];
     this.stayMarkers = [];
 
+    const sharedRenderer = getSharedCanvasRenderer(this.map);
+    const tolerance = RANGE_TOLERANCE_METERS[this.selectedRange] || 4;
+    const maxPoints = RANGE_MAX_TRACK_POINTS[this.selectedRange] || 2200;
+
     let hasData = false;
     for (const person of this.people) {
       const timeline = this.timelineByPerson.get(person.entity_id) || [];
@@ -536,8 +689,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       if (!points.length) continue;
 
       hasData = true;
-      const tolerance = RANGE_TOLERANCE_METERS[this.selectedRange] || 3;
-      const trackLayers = renderTimelineTrack(this.map, points, person, { tolerance });
+      const trackLayers = renderTimelineTrack(this.map, points, person, { tolerance, maxPoints });
       this.layers.push(...trackLayers);
     }
 
@@ -548,11 +700,11 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       const radius = Math.min(14, 7 + Math.log2(cluster.stays.length + 1) * 2);
       const stayMarker = window.L.circleMarker(cluster.point, {
         radius,
-        color: "#f57c00",
+        color: "#ffffff",
         fillColor: "#ff9800",
         fillOpacity: 0.9,
         weight: 2,
-        renderer: window.L.canvas({ padding: 0.5 }),
+        renderer: sharedRenderer,
       }).addTo(this.map);
       stayMarker._pointKey = key;
       stayMarker._clusterId = cluster.id;
@@ -561,19 +713,21 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       const detailsLink = poi?.url
         ? `<br><a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer">Mehr Infos auf OSM</a>`
         : "";
-      const visitCountText = cluster.stays.length > 1
-        ? `${cluster.stays.length} Aufenthalte · Gesamtdauer ${this._formatDuration(cluster.totalDurationMs)}`
-        : `1 Aufenthalt · Dauer ${this._formatDuration(cluster.totalDurationMs)}`;
+      const visitCountText =
+        cluster.stays.length > 1
+          ? `${cluster.stays.length} Aufenthalte · Gesamtdauer ${this._formatDuration(cluster.totalDurationMs)}`
+          : `1 Aufenthalt · Dauer ${this._formatDuration(cluster.totalDurationMs)}`;
 
       stayMarker.bindPopup(
-        `<strong>${poiLabel}</strong><br>${visitCountText}<br>Person: ${escapeHtml(cluster.person.name)}${detailsLink}`
+        `<strong>${poiLabel}</strong><br>${visitCountText}<br>Person: ${escapeHtml(cluster.person?.name)}${detailsLink}`
       );
 
       if (poi?.name) {
+        stayMarker._labelText = poi.name;
         stayMarker.bindTooltip(escapeHtml(poi.name), {
           permanent: true,
           direction: "top",
-          offset: [0, -6],
+          offset: [0, -8],
           className: "zeitachse-poi-label",
         });
       }
@@ -590,7 +744,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
       const group = window.L.featureGroup(this.layers);
       const bounds = group.getBounds();
       if (bounds.isValid()) {
-        this.map.fitBounds(bounds, { padding: [20, 20] });
+        this.map.fitBounds(bounds, { padding: [24, 24] });
       }
     }
     this._updateTooltipsVisibility();
@@ -599,31 +753,7 @@ class ZeitachseMapCard extends ZeitachseBaseCard {
 
   _updateTooltipsVisibility() {
     if (!this.map) return;
-    const currentZoom = this.map.getZoom();
-    const sortedClusters = [...this.stayClusters].sort((a, b) => b.totalDurationMs - a.totalDurationMs);
-    let maxVisibleTooltips = sortedClusters.length;
-    if (currentZoom < 8) {
-      maxVisibleTooltips = 4;
-    } else if (currentZoom < 11) {
-      maxVisibleTooltips = 8;
-    } else if (currentZoom < 13) {
-      maxVisibleTooltips = 16;
-    }
-
-    const visibleClusterIds = new Set(
-      sortedClusters.slice(0, maxVisibleTooltips).map((c) => c.id)
-    );
-
-    for (const marker of (this.stayMarkers || [])) {
-      const isVisible = visibleClusterIds.has(marker._clusterId);
-      const tooltip = marker.getTooltip();
-      if (tooltip) {
-        const el = tooltip.getElement();
-        if (el) {
-          el.style.display = isVisible ? "block" : "none";
-        }
-      }
-    }
+    updateOverlapCulledTooltips(this.map, this.stayClusters, this.stayMarkers);
   }
 }
 
@@ -671,28 +801,38 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
     this.shadowRoot.innerHTML = `
       <style>
         ha-card { padding: 12px; }
-        .status { margin-bottom: 10px; color: var(--secondary-text-color); }
+        .status { margin-bottom: 10px; color: var(--secondary-text-color); font-size: 0.85rem; }
         .stay-list {
           height: ${heightPx}px;
           min-height: ${heightPx}px;
           max-height: ${heightPx}px;
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          padding: 10px;
+          border: 1px solid var(--divider-color, rgba(255,255,255,0.1));
+          border-radius: 12px;
+          padding: 10px 12px;
           overflow: auto;
         }
         .stay-title { font-weight: 600; margin-bottom: 8px; }
-        .stay-item { border-top: 1px solid var(--divider-color); padding: 8px 0; }
-        .stay-item:first-of-type { border-top: none; padding-top: 0; }
+        .stay-item {
+          border-top: 1px solid var(--divider-color, rgba(255,255,255,0.08));
+          padding: 8px 6px;
+          cursor: pointer;
+          border-radius: 8px;
+          transition: background-color 0.15s ease;
+        }
+        .stay-item:hover {
+          background: rgba(127, 127, 127, 0.1);
+        }
+        .stay-item:first-of-type { border-top: none; padding-top: 4px; }
         .stay-empty { color: var(--secondary-text-color); }
-        .stay-meta { color: var(--secondary-text-color); font-size: 0.9rem; }
-        .dot { width: 12px; height: 12px; border-radius: 50%; display:inline-block; margin-right:8px; }
+        .stay-meta { color: var(--secondary-text-color); font-size: 0.85rem; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display:inline-block; margin-right:6px; }
       </style>
       <ha-card>
         <div class="status" id="status">Zeitachse lädt…</div>
         <div class="stay-list" id="stay-list"></div>
       </ha-card>
     `;
+    this._syncTheme();
   }
 
   _renderData() {
@@ -716,7 +856,7 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
 
     const stays = this.stays;
     if (!stays.length) {
-      container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]})</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
+      container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte · ${RANGE_LABELS[this.selectedRange]}</div><div class="stay-empty">Keine längeren Aufenthalte im ausgewählten Zeitraum gefunden.</div>`;
       return;
     }
 
@@ -726,23 +866,26 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
     });
 
     const groups = groupStaysByPeriod(stays, this.selectedRange);
+    const safeColor = sanitizeColor(person.color);
+    let stayCounter = 0;
 
     const sectionsHtml = groups
       .map((group) => {
         const itemsHtml = group.stays
           .map((stay) => {
+            const stayIndex = stayCounter++;
             const key = pointKey(stay.canonicalPoint || stay.point);
             const poi = this.poiByPoint.get(key) || null;
             const poiName = poi?.name ? escapeHtml(poi.name) : "Aufenthaltsort";
             const poiLink = poi?.url
-              ? ` · <a href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
+              ? ` · <a class="stay-osm-link" href="${escapeHtml(poi.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary-color);">OSM</a>`
               : "";
 
             return `
-              <div class="stay-item" style="border-top:1px solid var(--divider-color); padding:6px 0;">
+              <div class="stay-item" role="button" tabindex="0" data-stay-index="${stayIndex}">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                   <div>
-                    <span class="dot" style="background:${person.color}; display:inline-block; margin-right:6px;"></span>
+                    <span class="dot" style="background:${safeColor};"></span>
                     <strong>${poiName}</strong>${poiLink}
                   </div>
                   <span style="background:var(--primary-color, #03a9f4); color:#fff; border-radius:10px; padding:1px 6px; font-size:0.75rem; font-weight:600;">${this._formatDuration(stay.durationMs)}</span>
@@ -757,7 +900,7 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
 
         return `
           <div style="margin-bottom:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; background:rgba(255,255,255,0.04); border-left:3px solid var(--primary-color, #03a9f4); border-radius:4px; font-weight:600; font-size:0.88rem; margin-bottom:4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; background:rgba(127,127,127,0.08); border-left:3px solid var(--primary-color, #03a9f4); border-radius:4px; font-weight:600; font-size:0.88rem; margin-bottom:4px;">
               <span>📅 ${escapeHtml(group.title)}</span>
               <span style="font-size:0.75rem; font-weight:normal; color:var(--secondary-text-color);">${group.stays.length} Aufenthalte · ${this._formatDuration(group.totalDurationMs)}</span>
             </div>
@@ -767,7 +910,33 @@ class ZeitachseTimelineCard extends ZeitachseBaseCard {
       })
       .join("");
 
-    container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte (${RANGE_LABELS[this.selectedRange]} · ${stays.length} Besuche)</div>${sectionsHtml}`;
+    container.innerHTML = `<div class="stay-title">${escapeHtml(person.name)} · Aufenthalte · ${RANGE_LABELS[this.selectedRange]} · ${stays.length} Besuche</div>${sectionsHtml}`;
+
+    for (const osmLink of container.querySelectorAll(".stay-osm-link")) {
+      osmLink.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+    }
+
+    for (const itemEl of container.querySelectorAll(".stay-item")) {
+      const idx = Number(itemEl.getAttribute("data-stay-index"));
+      const stay = stays[idx];
+      if (!stay) continue;
+      const dispatchFocus = () => {
+        window.dispatchEvent(
+          new CustomEvent("zeitachse-focus-stay", {
+            detail: { point: stay.canonicalPoint || stay.point, stay },
+          })
+        );
+      };
+      itemEl.addEventListener("click", dispatchFocus);
+      itemEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          dispatchFocus();
+        }
+      });
+    }
   }
 }
 
@@ -825,7 +994,7 @@ class ZeitachseCardEditor extends HTMLElement {
             ).join("")}
           </select>
         </label>
-        <label>Höhe (Rasterreihen)
+        <label>Höhe in Rasterreihen
           <input id="height_rows" type="number" min="1" step="1" value="${selectedRows}" style="width:100%;">
         </label>
       </div>
@@ -860,7 +1029,7 @@ class ZeitachseCardEditor extends HTMLElement {
 
     this.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <label>Personen (Strg/Cmd für Mehrfachauswahl)
+        <label>Personen - Strg/Cmd für Mehrfachauswahl
           <select id="people" multiple size="6" style="width:100%;">
             ${personOptions
               .map(
@@ -888,15 +1057,24 @@ class ZeitachseCardEditor extends HTMLElement {
         </label>
         <label>Kartenanbieter
           <select id="tile_provider" style="width:100%;">
-            ${Object.entries(BASEMAP_PROVIDERS).map(([k, v]) => `<option value="${k}" ${(this._config.tile_provider || "local_osm") === k ? "selected" : ""}>${escapeHtml(v.name)}</option>`).join("")}
-            <option value="custom" ${this._config.tile_provider === "custom" ? "selected" : ""}>Benutzerdefiniert (URL)</option>
+            ${Object.entries(BASEMAP_PROVIDERS)
+              .map(
+                ([k, v]) =>
+                  `<option value="${k}" ${(this._config.tile_provider || "local_osm") === k ? "selected" : ""}>${escapeHtml(v.name)}</option>`
+              )
+              .join("")}
+            <option value="custom" ${this._config.tile_provider === "custom" ? "selected" : ""}>Benutzerdefiniert - URL</option>
           </select>
         </label>
-        ${this._config.tile_provider === "custom" ? `
+        ${
+          this._config.tile_provider === "custom"
+            ? `
           <label>Karten-URL
-            <input id="tile_url" type="text" placeholder="https://.../{z}/{x}/{y}.png" value="${escapeHtml(this._config.tile_url || "")}" style="width:100%;">
+            <input id="tile_url" type="text" placeholder="https://..." value="${escapeHtml(this._config.tile_url || "")}" style="width:100%;">
           </label>
-        ` : ""}
+        `
+            : ""
+        }
         <label>
           <input id="interactive" type="checkbox" ${interactive ? "checked" : ""}>
           Interaktive Karte
